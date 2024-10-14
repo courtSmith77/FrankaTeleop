@@ -7,6 +7,9 @@
   <maintainer email="gclifford@u.northwestern.edu">Graham Clifford</maintainer>
   <license>APLv2</license>
 
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>pyautogui</exec_depend>
+
   <depend>mediapipelib</depend>
   <depend>hand_interfaces</depend>
 
