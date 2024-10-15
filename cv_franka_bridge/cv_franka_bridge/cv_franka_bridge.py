@@ -229,14 +229,18 @@ class CvFrankaBridge(Node):
         distance = np.linalg.norm(np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]) -
                                   np.array([self.current_waypoint.position.x, self.current_waypoint.position.y, self.current_waypoint.position.z]))
 
+        # self.get_logger().info(f'Distace between current and msg = {distance}')
+
         # filter out tiny movements to reduce jitter, and large errors from 
         # camera
         if distance < self.lower_distance_threshold and distance > self.upper_distance_threshold:
             # experimental, might help with jerkiness when the use moves their hand too fast
             self.offset = self.current_waypoint
+            # self.get_logger().info(f'Offset replaced = {self.offset}')
             return
         else:
             self.current_waypoint = msg.pose
+            # self.get_logger().info(f'Current waypoint = {self.current_waypoint}')
 
     def right_gesture_callback(self, msg):
         """
@@ -352,9 +356,12 @@ class CvFrankaBridge(Node):
             delta.position.z = (self.current_waypoint.position.z - self.offset.position.z) / 1000 # convert to meters
 
             # Get the current and desired positions and orientations of the end-effector
-            self.desired_ee_pose.position.x = delta.position.z + self.initial_ee_pose.position.x
+            # self.desired_ee_pose.position.x = delta.position.z + self.initial_ee_pose.position.x
+            # self.desired_ee_pose.position.y = delta.position.x + self.initial_ee_pose.position.y
+            # self.desired_ee_pose.position.z = -delta.position.y + self.initial_ee_pose.position.z
+            self.desired_ee_pose.position.x = delta.position.y + self.initial_ee_pose.position.x
             self.desired_ee_pose.position.y = delta.position.x + self.initial_ee_pose.position.y
-            self.desired_ee_pose.position.z = -delta.position.y + self.initial_ee_pose.position.z
+            self.desired_ee_pose.position.z = delta.position.z + self.initial_ee_pose.position.z
 
         if (self.desired_ee_pose.position.x < self.x_limits[0] or self.desired_ee_pose.position.x > self.x_limits[1]):
             self.desired_ee_pose.position.x = self.x_limits[0] if self.desired_ee_pose.position.x < self.x_limits[0] else self.x_limits[1]

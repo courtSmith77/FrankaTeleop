@@ -59,11 +59,13 @@ class HandCV(Node):
         self.centroid = np.array([0.0, 0.0, 0.0])
 
         # create timer
-        self.timer = self.create_timer(0.01, self.timer_callback)
+        self.timer = self.create_timer(1/30, self.timer_callback)
 
         # keyboard hot keys
         self.get_logger().info("Press the letter 'b' to begin tracking mouse position.\n")
-        self.get_logger().info("Press the letter 's' to stop tracking mouse position.\n")
+        self.get_logger().info("Press the letter 'p' to stop tracking mouse position.\n")
+        self.get_logger().info("Press the letter 'w' to increase z position.\n")
+        self.get_logger().info("Press the letter 's' to decrease z position.\n")
         self.get_logger().info("Press the letter 'o' to open gripper.\n")
         self.get_logger().info("Press the letter 'c' to close gripper.\n")
         self.get_logger().info("Press the letter 'x' to terminal the node.\n")
@@ -72,6 +74,7 @@ class HandCV(Node):
 
         self.listening = True
         self.tracking = False
+        self.z_change = False
         self.command_mode = 'None'
 
     def getKey(self):
@@ -91,11 +94,11 @@ class HandCV(Node):
 
         if self.key == 'b':
             self.get_logger().info(f'Tracking mouse position now.\r\n')
-            self.command_mode = 'Thumbs_Up'
+            self.command_mode = 'Thumb_Up'
             self.tracking = True
-        elif self.key == 's':
+        elif self.key == 'p':
             self.get_logger().info(f'Stopping tracking mouse position now.\r\n')
-            self.command_mode = 'Thumbs_Down'
+            self.command_mode = 'Thumb_Down'
             self.tracking = False
         elif self.key == 'o':
             self.get_logger().info(f'Opening gripper now.\r\n')
@@ -108,6 +111,12 @@ class HandCV(Node):
             self.listening = False
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.settings)
             raise 'Node Terminated.'
+        elif self.key == 'w':
+            self.z_diff = 5
+            self.z_change = True
+        elif self.key == 's':
+            self.z_diff = -5
+            self.z_change = True
 
     def timer_callback(self):
         """Publish the annotated image and the waypoint for the arm"""
@@ -120,6 +129,9 @@ class HandCV(Node):
 
         if self.tracking:
             self.centroid[0], self.centroid[1] = pyautogui.position()
+            if self.z_change:
+                self.centroid[2] += self.z_diff
+                self.z_change = False
 
         # publish command mode
         self.right_gesture_pub.publish(String(data=self.command_mode))

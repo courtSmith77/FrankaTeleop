@@ -53,11 +53,6 @@ def generate_launch_description():
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("use_realsense")),
             ),
-            Node(
-                package='tf2_ros',
-                executable='static_transform_publisher',
-                arguments = ['--x', '0', '--y', '0', '--z', '0', '--yaw', '-1.5708', '--pitch', '0', '--roll', '-1.5708', '--frame-id', 'panda_link0', '--child-frame-id', 'camera_link']
-            ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([PathJoinSubstitution(
                     [FindPackageShare('franka_gripper'), 'launch', 'gripper.launch.py'])]),
