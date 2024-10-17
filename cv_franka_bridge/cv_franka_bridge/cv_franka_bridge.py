@@ -60,10 +60,13 @@ class CvFrankaBridge(Node):
         # create publishers
         self.text_marker_publisher = self.create_publisher(Marker, 'text_marker', 10)
         self.bounding_box_publisher = self.create_publisher(Marker, 'bounding_box', 10)
+        self.desired_ee_pub = self.create_publisher(Pose, 'desired_ee_pose', 10)
 
         # create clients
         self.waypoint_client = self.create_client(PlanPath, 'robot_waypoints')
         self.waypoint_client.wait_for_service(timeout_sec=2.0)
+        self.record_client = self.create_client(Empty, 'record')
+        self.record_client.wait_for_service(timeout_sec=2.0)
 
         # create timer
         self.timer = self.create_timer(0.04, self.timer_callback)
@@ -309,6 +312,7 @@ class CvFrankaBridge(Node):
             phi = np.arctan2(self.desired_ee_pose.position.y, self.desired_ee_pose.position.x)
             quat = quaternion_from_euler(-np.pi, 0.0, 0.0)
             self.desired_ee_pose.orientation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
+            future = self.record_client.call_async(Empty.Request())
 
         self.prev_gesture = msg.data
 
@@ -356,9 +360,6 @@ class CvFrankaBridge(Node):
             delta.position.z = (self.current_waypoint.position.z - self.offset.position.z) / 1000 # convert to meters
 
             # Get the current and desired positions and orientations of the end-effector
-            # self.desired_ee_pose.position.x = delta.position.z + self.initial_ee_pose.position.x
-            # self.desired_ee_pose.position.y = delta.position.x + self.initial_ee_pose.position.y
-            # self.desired_ee_pose.position.z = -delta.position.y + self.initial_ee_pose.position.z
             self.desired_ee_pose.position.x = delta.position.y + self.initial_ee_pose.position.x
             self.desired_ee_pose.position.y = delta.position.x + self.initial_ee_pose.position.y
             self.desired_ee_pose.position.z = delta.position.z + self.initial_ee_pose.position.z
@@ -369,6 +370,9 @@ class CvFrankaBridge(Node):
             self.desired_ee_pose.position.y = self.y_limits[0] if self.desired_ee_pose.position.y < self.y_limits[0] else self.y_limits[1]
         if (self.desired_ee_pose.position.z < self.z_limits[0] or self.desired_ee_pose.position.z > self.z_limits[1]):
             self.desired_ee_pose.position.z = self.z_limits[0] if self.desired_ee_pose.position.z < self.z_limits[0] else self.z_limits[1]
+
+        # publish desired ee pose for data collection
+        self.desired_ee_pub.publish(self.desired_ee_pose)
 
         try:
             ee_pose = self.get_ee_pose()

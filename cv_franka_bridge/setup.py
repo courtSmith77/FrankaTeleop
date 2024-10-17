@@ -13,6 +13,7 @@ setup(
         ('share/' + package_name + '/launch', ['launch/integrate_servo.launch.py']),
         ('share/' + package_name + '/config', ['config/integrate.rviz']),
         ('share/' + package_name + '/config', ['config/integrate_servo.rviz']),
+        ('share/' + package_name + '/config', ['config/2vids.rviz']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,7 +24,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'cv_franka_bridge = cv_franka_bridge.cv_franka_bridge:main'
+            'cv_franka_bridge = cv_franka_bridge.cv_franka_bridge:main',
+            'data_collection = cv_franka_bridge.data_collection:main'
         ],
     },
 )

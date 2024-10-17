@@ -16,6 +16,8 @@ def generate_launch_description():
                                   description="whether or not to use fake hardware."),
             DeclareLaunchArgument(name="use_rviz", default_value="true",
                                   description="whether or not to use rviz."),
+            DeclareLaunchArgument(name="collect_data", default_value="false",
+                                  description="whether or not to use rviz."),
             DeclareLaunchArgument(name="robot_ip", default_value="dont-care",
                                   description="IP address of the robot"),
             DeclareLaunchArgument(name="use_realsense", default_value="true",
@@ -52,6 +54,12 @@ def generate_launch_description():
                 executable="cv_franka_bridge",
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("use_realsense")),
+            ),
+            Node(
+                package="cv_franka_bridge",
+                executable="data_collection",
+                output="screen",
+                condition=IfCondition(LaunchConfiguration("collect_data")),
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([PathJoinSubstitution(
