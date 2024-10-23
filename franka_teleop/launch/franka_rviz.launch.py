@@ -77,11 +77,5 @@ def generate_launch_description():
                     moveit_config_real.robot_description_kinematics,
                 ],
             ),
-            # IncludeLaunchDescription(
-            #     PythonLaunchDescriptionSource([PathJoinSubstitution(
-            #         [FindPackageShare('franka_gripper'), 'launch', 'gripper.launch.py'])]),
-            #     launch_arguments={'robot_ip': LaunchConfiguration("robot_ip"),
-            #                       'use_fake_hardware': LaunchConfiguration("use_fake_hardware")}.items(),
-            # ),
         ]
     )

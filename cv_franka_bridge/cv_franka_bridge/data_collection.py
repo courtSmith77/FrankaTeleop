@@ -75,7 +75,6 @@ class DataCollection(Node):
             if self.received_ee_pose and self.received_ee_image and self.received_scene_image and self.end:
 
                 ee_data = [self.desired_ee.position.x, self.desired_ee.position.y, self.desired_ee.position.z]
-                self.get_logger().info(f'{ee_data}')
                 with open(self.pos_data, mode='a') as csv_file:
                     csv_writer = csv.writer(csv_file)
                     csv_writer.writerow(ee_data)
@@ -87,12 +86,10 @@ class DataCollection(Node):
                 cv.imwrite(scene_img_name, self.scene_image)
 
                 self.count+=1
-                self.received_ee_pose = False
-                self.received_ee_image = False
-                self.received_scene_image = False
 
-                if self.count % 10 == 0:
+                if self.count % 50 == 0:
                     self.get_logger().info(f'Received {self.count} messages')
+
 
 def main(args=None):
     rclpy.init(args=args)

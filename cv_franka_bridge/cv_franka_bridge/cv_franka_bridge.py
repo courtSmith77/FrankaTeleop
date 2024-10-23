@@ -47,11 +47,11 @@ class CvFrankaBridge(Node):
 
         # create callback groups
         self.waypoint_callback_group = MutuallyExclusiveCallbackGroup()
-        self.gesture_callback_group = MutuallyExclusiveCallbackGroup()
+        self.command_mode_callback_group = MutuallyExclusiveCallbackGroup()
 
         # create subscribers
         self.waypoint_subscriber = self.create_subscription(PoseStamped, 'waypoint', self.waypoint_callback, 10, callback_group=self.waypoint_callback_group)
-        self.right_gesture_subscriber = self.create_subscription(String, 'right_gesture', self.right_gesture_callback, 10, callback_group=self.gesture_callback_group)
+        self.command_mode_subscriber = self.create_subscription(String, 'command_mode', self.command_mode_callback, 10, callback_group=self.command_mode_callback_group)
 
         # create publishers
         self.text_marker_publisher = self.create_publisher(Marker, 'text_marker', 10)
@@ -72,7 +72,7 @@ class CvFrankaBridge(Node):
         self.listener = TransformListener(self.buffer, self)
 
         # create class variables
-        self.text_marker = self.create_text_marker("Press_'b'_to_begin_teleoperation")
+        self.text_marker = self.create_text_marker("Press 'b' to begin teleoperation")
 
         self.current_waypoint = None
         self.previous_waypoint = None
@@ -203,20 +203,16 @@ class CvFrankaBridge(Node):
         distance = np.linalg.norm(np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]) -
                                   np.array([self.current_waypoint.position.x, self.current_waypoint.position.y, self.current_waypoint.position.z]))
 
-        # self.get_logger().info(f'Distace between current and msg = {distance}')
-
         # filter out tiny movements to reduce jitter, and large errors from 
         # camera
         if distance < self.lower_distance_threshold and distance > self.upper_distance_threshold:
             # experimental, might help with jerkiness when the use moves their hand too fast
             self.offset = self.current_waypoint
-            # self.get_logger().info(f'Offset replaced = {self.offset}')
             return
         else:
             self.current_waypoint = msg.pose
-            # self.get_logger().info(f'Current waypoint = {self.current_waypoint}')
 
-    def right_gesture_callback(self, msg):
+    def command_mode_callback(self, msg):
         """
         Callback for the right gesture subscriber.
 
@@ -231,7 +227,7 @@ class CvFrankaBridge(Node):
         None
 
         """
-        if msg.data == "Thumb_Up" or msg.data == "Thumb_Down":
+        if msg.data == "Begin" or msg.data == "Pause":
             # if thumbs up, start tracking the user's hand
             if self.count == 0:
                 self.desired_ee_pose = self.get_ee_pose()
@@ -240,16 +236,16 @@ class CvFrankaBridge(Node):
             self.text_marker = self.create_text_marker(msg.data)
             self.move_robot = False
 
-        elif msg.data == "Closed_Fist" :
+        elif msg.data == "Closed_Gripper" :
             self.get_logger().info('Fake Closing Gripper', once=True)
 
-        elif msg.data == "Open_Palm":
+        elif msg.data == "Open_Gripper":
             self.get_logger().info('Fake Opening Gripper', once=True)
 
-        if msg.data != "Thumb_Up" and msg.data != "Thumb_Down":
+        if msg.data != "Begin" and msg.data != "Pause":
             self.count = 0
 
-        if self.prev_gesture == "Thumb_Up" and msg.data != "Thumb_Up":
+        if self.prev_gesture == "Begin" and msg.data != "Begin":
             self.move_robot = True
             self.offset = self.current_waypoint
             self.initial_ee_pose = self.get_ee_pose()

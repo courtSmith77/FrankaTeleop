@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'handcv'
+package_name = 'commandmode'
 
 setup(
     name=package_name,
@@ -11,7 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/config',
-         ['config/handcv.rviz', 'config/hand_landmarker.task', 'config/gesture_recognizer.task', 'config/high_density_preset.json']),
+         ['config/commandmode.rviz', 'config/high_density_preset.json']),
         ('share/' + package_name + '/launch', ['launch/camera.launch.py']),
     ],
     install_requires=['setuptools'],
@@ -24,7 +24,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'handcv = handcv.handcv:main'
+            'commandmode = commandmode.commandmode:main'
         ],
     },
 )

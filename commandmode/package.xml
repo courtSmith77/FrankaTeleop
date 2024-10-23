@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>handcv</name>
+  <name>commandmode</name>
   <version>0.0.1</version>
   <description>"A package implementing computer vision with the Intel Realsense D435i Camera to recognize and find the 3D location of a human hand."</description>
   <maintainer email="gclifford@u.northwestern.edu">Graham Clifford</maintainer>
@@ -11,7 +11,6 @@
   <exec_depend>pyautogui</exec_depend>
 
   <depend>mediapipelib</depend>
-  <depend>hand_interfaces</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

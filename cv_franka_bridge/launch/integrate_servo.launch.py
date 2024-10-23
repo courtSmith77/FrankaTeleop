@@ -42,7 +42,7 @@ def generate_launch_description():
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([PathJoinSubstitution(
-                    [FindPackageShare('handcv'), 'launch', 'camera.launch.py'])]),
+                    [FindPackageShare('commandmode'), 'launch', 'camera.launch.py'])]),
                 launch_arguments={'use_realsense': LaunchConfiguration("use_realsense")}.items(),
                 condition=IfCondition(LaunchConfiguration("use_realsense"))
             ),

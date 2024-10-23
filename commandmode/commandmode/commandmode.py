@@ -34,9 +34,9 @@ import termios
 from select import select
 
 
-class HandCV(Node):
+class CommandMode(Node):
     def __init__(self):
-        super().__init__("handcv")
+        super().__init__("commandmode")
 
         # create callback groups
         self.timer_callback_group = MutuallyExclusiveCallbackGroup()
@@ -49,8 +49,8 @@ class HandCV(Node):
         self.waypoint_pub = self.create_publisher(
                 PoseStamped, 'waypoint', 10)
 
-        self.right_gesture_pub = self.create_publisher(
-                String, 'right_gesture', 10)
+        self.command_mode_pub = self.create_publisher(
+                String, 'command_mode', 10)
 
         # intialize other variables
         self.waypoint = PoseStamped() 
@@ -94,18 +94,18 @@ class HandCV(Node):
 
         if self.key == 'b':
             self.get_logger().info(f'Tracking mouse position now.\r\n')
-            self.command_mode = 'Thumb_Up'
+            self.command_mode = 'Begin'
             self.tracking = True
         elif self.key == 'p':
             self.get_logger().info(f'Stopping tracking mouse position now.\r\n')
-            self.command_mode = 'Thumb_Down'
+            self.command_mode = 'Pause'
             self.tracking = False
         elif self.key == 'o':
             self.get_logger().info(f'Opening gripper now.\r\n')
-            self.command_mode = 'Open_Palm' 
+            self.command_mode = 'Open_Gripper' 
         elif self.key == 'c':
             self.get_logger().info(f'Closing gripper now.\r\n')
-            self.command_mode = 'Closed_Fist'
+            self.command_mode = 'Closed_Gripper'
         elif self.key == 'x':
             self.get_logger().info(f'Terminating node now.\r\n')
             self.listening = False
@@ -134,7 +134,7 @@ class HandCV(Node):
                 self.z_change = False
 
         # publish command mode
-        self.right_gesture_pub.publish(String(data=self.command_mode))
+        self.command_mode_pub.publish(String(data=self.command_mode))
         
         # publish the waypoint
         self.waypoint.header.stamp = self.get_clock().now().to_msg()
@@ -147,9 +147,9 @@ class HandCV(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    handcv = HandCV()
+    commandmode = CommandMode()
 
-    rclpy.spin(handcv)
+    rclpy.spin(commandmode)
 
 
 if __name__ == '__main__':
