@@ -1,11 +1,8 @@
-import os 
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import ExecuteProcess, Shutdown, DeclareLaunchArgument, IncludeLaunchDescription
-from ament_index_python.packages import get_package_share_directory
-from moveit_configs_utils import MoveItConfigsBuilder
-from launch.conditions import IfCondition, UnlessCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, FindExecutable, Command, AndSubstitution
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
@@ -61,14 +58,5 @@ def generate_launch_description():
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("collect_data")),
             ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource([PathJoinSubstitution(
-                    [FindPackageShare('franka_gripper'), 'launch', 'gripper.launch.py'])]),
-                condition=IfCondition(LaunchConfiguration("run_franka_teleop")),
-                launch_arguments={'robot_ip': LaunchConfiguration("robot_ip"),
-                                  'use_fake_hardware': LaunchConfiguration("use_fake_hardware")}.items(),
-            ),
-            # SetLaunchConfiguration(
-            #     "robot_ip", PythonExpression(["'\"dont-care\" if ", LaunchConfiguration("use_fake_hardware"), " == \"true\" else \"panda0.robot\"'"])),
         ]
     )

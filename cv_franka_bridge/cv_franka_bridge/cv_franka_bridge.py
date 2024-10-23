@@ -34,11 +34,8 @@ from tf2_geometry_msgs import PoseStamped
 import tf2_ros
 from tf_transformations import quaternion_from_euler, euler_from_quaternion
 
-from franka_msgs.action import Homing, Grasp
-
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 import numpy as np
@@ -54,7 +51,6 @@ class CvFrankaBridge(Node):
 
         # create subscribers
         self.waypoint_subscriber = self.create_subscription(PoseStamped, 'waypoint', self.waypoint_callback, 10, callback_group=self.waypoint_callback_group)
-        # self.left_gesture_subscriber = self.create_subscription(String, 'left_gesture', self.left_gesture_callback, 10, callback_group=self.gesture_callback_group)
         self.right_gesture_subscriber = self.create_subscription(String, 'right_gesture', self.right_gesture_callback, 10, callback_group=self.gesture_callback_group)
 
         # create publishers
@@ -71,31 +67,12 @@ class CvFrankaBridge(Node):
         # create timer
         self.timer = self.create_timer(0.04, self.timer_callback)
 
-        # create action clients
-        self.gripper_homing_client = ActionClient(
-                self, Homing, 'panda_gripper/homing')
-        self.gripper_grasping_client = ActionClient(
-                self, Grasp, 'panda_gripper/grasp')
-
-        self.gripper_grasping_client.wait_for_server(timeout_sec=1.0)
-        # with a fake gripper, the homing server will not be created
-        if not self.gripper_homing_client.wait_for_server(
-                timeout_sec=1):
-            self.gripper_ready = False
-            self.gripper_homed = True
-
         # create tf buffer and listener
         self.buffer = Buffer()
         self.listener = TransformListener(self.buffer, self)
 
         # create class variables
         self.text_marker = self.create_text_marker("Press_'b'_to_begin_teleoperation")
-        self.gripper_ready = True
-        self.gripper_status = "Open"
-        self.gripper_homed = False
-        self.gripper_force_control = False
-        self.gripper_force = 0.001
-        self.max_gripper_force = 10.0
 
         self.current_waypoint = None
         self.previous_waypoint = None
@@ -125,9 +102,9 @@ class CvFrankaBridge(Node):
         self.yaw_error_prior = 0
 
         # bounding box variables
-        self.x_limits = [0.2, 0.6]
-        self.y_limits = [-0.25, 0.25]
-        self.z_limits = [0.15, 0.7]
+        self.x_limits = [0.15, 0.65]
+        self.y_limits = [-0.30, 0.30]
+        self.z_limits = [0.05, 0.75]
         self.bounding_box_marker = self.create_box_marker()
 
         self.count = 0
@@ -181,12 +158,6 @@ class CvFrankaBridge(Node):
         marker.color.g = 0.0
         marker.color.b = 1.0
         return marker
-
-    def gripper_homing_callback(self, request, response):
-        """Callback for the gripper homing service."""
-        goal = Homing.Goal()
-        self.gripper_homing_client.send_goal_async(goal, feedback_callback=self.feedback_callback)
-        return response
 
     def get_transform(self, target_frame, source_frame):
         """Get the transform between two frames."""
@@ -269,37 +240,11 @@ class CvFrankaBridge(Node):
             self.text_marker = self.create_text_marker(msg.data)
             self.move_robot = False
 
-        elif msg.data == "Closed_Fist" and self.gripper_ready and self.gripper_status == "Open":
-            # if closed fist, close the gripper
-            self.text_marker = self.create_text_marker(msg.data)
-            self.gripper_ready = False
-            self.gripper_status = "Closed"
-            self.gripper_force_control = False
-            self.gripper_force = 0.001
-            grasp_goal = Grasp.Goal()
-            grasp_goal.width = 0.01
-            grasp_goal.speed = 0.1
-            grasp_goal.epsilon.inner = 0.05
-            grasp_goal.epsilon.outer = 0.05
-            grasp_goal.force = self.gripper_force
-            future = self.gripper_grasping_client.send_goal_async(grasp_goal, feedback_callback=self.feedback_callback)
-            future.add_done_callback(self.grasp_response_callback)
+        elif msg.data == "Closed_Fist" :
+            self.get_logger().info('Fake Closing Gripper', once=True)
 
-        elif msg.data == "Open_Palm" and self.gripper_ready and self.gripper_status == "Closed":
-            # if open palm, open the gripper
-            self.text_marker = self.create_text_marker(msg.data)
-            self.gripper_force = 3.0
-            grasp_goal = Grasp.Goal()
-            grasp_goal.width = 0.075
-            grasp_goal.speed = 0.2
-            grasp_goal.epsilon.inner = 0.001
-            grasp_goal.epsilon.outer = 0.001
-            grasp_goal.force = self.gripper_force
-            future = self.gripper_grasping_client.send_goal_async(grasp_goal, feedback_callback=self.feedback_callback)
-            future.add_done_callback(self.grasp_response_callback)
-            self.gripper_ready = False
-            self.gripper_status = "Open"
-            self.gripper_force_control = False
+        elif msg.data == "Open_Palm":
+            self.get_logger().info('Fake Opening Gripper', once=True)
 
         if msg.data != "Thumb_Up" and msg.data != "Thumb_Down":
             self.count = 0
@@ -315,36 +260,6 @@ class CvFrankaBridge(Node):
             future = self.record_client.call_async(Empty.Request())
 
         self.prev_gesture = msg.data
-
-    def grasp_response_callback(self, future):
-        """Callback for the grasp response."""
-
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.get_logger().info('Goal rejected :(')
-            return
-        self.get_logger().info('Goal accepted :)')
-
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
-
-    def get_result_callback(self, future):
-        """Callback for the grasp result."""
-
-        result = future.result().result
-        self.get_logger().info(f'Result: {result}')
-        self.gripper_ready = True
-
-    def feedback_callback(self, feedback):
-        """Callback for the feedback from the gripper action server."""
-
-        self.get_logger().info(f"Feedback: {feedback}")
-
-    async def home_gripper(self):
-        """Home the gripper."""
-
-        await self.gripper_homing_client.send_goal_async(Homing.Goal(), feedback_callback=self.feedback_callback)
-        self.gripper_homed = True
 
     async def timer_callback(self):
         """Callback for the timer."""
