@@ -77,7 +77,9 @@ class CvFrankaBridge(Node):
         self.current_waypoint = None
         self.previous_waypoint = None
         self.offset = None
-        self.initial_ee_pose = Pose(position=Point(x=0.30674, y=-0.0014384, z=0.48529),
+        # self.initial_ee_pose = Pose(position=Point(x=0.30674, y=-0.0014384, z=0.48529),
+        #                             orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
+        self.initial_ee_pose = Pose(position=Point(x=0.12, y=0.402, z=0.080),
                                     orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
         self.desired_ee_pose = self.initial_ee_pose
         self.waypoints = []
@@ -102,9 +104,12 @@ class CvFrankaBridge(Node):
         self.yaw_error_prior = 0
 
         # bounding box variables
-        self.x_limits = [0.15, 0.65]
-        self.y_limits = [-0.30, 0.30]
-        self.z_limits = [0.05, 0.75]
+        # self.x_limits = [0.15, 0.65]
+        # self.y_limits = [-0.30, 0.30]
+        # self.z_limits = [0.05, 0.75]
+        self.x_limits = [0.10, 1.0]
+        self.y_limits = [-0.75, 0.75]
+        self.z_limits = [0.07, 0.75]
         self.bounding_box_marker = self.create_box_marker()
 
         self.count = 0
