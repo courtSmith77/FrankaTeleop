@@ -50,7 +50,7 @@ class CvFrankaBridge(Node):
         self.command_mode_callback_group = MutuallyExclusiveCallbackGroup()
 
         # create subscribers
-        self.waypoint_subscriber = self.create_subscription(PoseStamped, 'waypoint', self.waypoint_callback, 10, callback_group=self.waypoint_callback_group)
+        self.action_subscriber = self.create_subscription(Pose, 'predicted_action', self.action_callback, 10, callback_group=self.waypoint_callback_group)
         self.command_mode_subscriber = self.create_subscription(String, 'command_mode', self.command_mode_callback, 10, callback_group=self.command_mode_callback_group)
 
         # create publishers
@@ -72,7 +72,7 @@ class CvFrankaBridge(Node):
         self.listener = TransformListener(self.buffer, self)
 
         # create class variables
-        self.text_marker = self.create_text_marker("Press 'b' to begin teleoperation")
+        self.text_marker = self.create_text_marker("Press 'b' to begin inference")
 
         self.current_waypoint = None
         self.previous_waypoint = None
@@ -85,6 +85,7 @@ class CvFrankaBridge(Node):
         self.waypoints = []
         self.move_robot = False
         self.prev_gesture = None
+        self.offset_flag = False
         self.start_time = self.get_clock().now()
 
         self.lower_distance_threshold = 3.0
@@ -198,14 +199,19 @@ class CvFrankaBridge(Node):
         ee_pose.orientation.w = ee_home_rot.w
         return ee_pose
 
-    def waypoint_callback(self, msg):
-        """Callback for the waypoint subscriber."""
+    def action_callback(self, msg):
+        """Callback for the action subscriber."""
+        self.get_logger().info('Action Received')
         if self.current_waypoint is None:
-            self.current_waypoint = msg.pose
-            self.previous_waypoint = msg.pose
+            self.current_waypoint = msg
+            self.previous_waypoint = msg
             return
+        
+        if self.offset_flag:
+            self.offset = self.current_waypoint
+            self.offset_flag = False
 
-        distance = np.linalg.norm(np.array([msg.pose.position.x, msg.pose.position.y, msg.pose.position.z]) -
+        distance = np.linalg.norm(np.array([msg.position.x, msg.position.y, msg.position.z]) -
                                   np.array([self.current_waypoint.position.x, self.current_waypoint.position.y, self.current_waypoint.position.z]))
 
         # filter out tiny movements to reduce jitter, and large errors from 
@@ -215,7 +221,7 @@ class CvFrankaBridge(Node):
             self.offset = self.current_waypoint
             return
         else:
-            self.current_waypoint = msg.pose
+            self.current_waypoint = msg
 
     def command_mode_callback(self, msg):
         """
@@ -241,24 +247,21 @@ class CvFrankaBridge(Node):
             self.text_marker = self.create_text_marker(msg.data)
             self.move_robot = False
 
-        elif msg.data == "Closed_Gripper" :
-            self.get_logger().info('Fake Closing Gripper', once=True)
-
-        elif msg.data == "Open_Gripper":
-            self.get_logger().info('Fake Opening Gripper', once=True)
-
         if msg.data != "Begin" and msg.data != "Pause":
             self.count = 0
 
-        if self.prev_gesture == "Begin" and msg.data != "Begin":
+        if msg.data == "Pause":
+            self.move_robot = False
+        elif self.prev_gesture == "Begin" and msg.data == "Action":
+            self.get_logger().info('Allowing robot to move now, if actions are sent')
             self.move_robot = True
-            self.offset = self.current_waypoint
+            self.offset_flag = True
+            # self.offset = self.current_waypoint
             self.initial_ee_pose = self.get_ee_pose()
             self.desired_ee_pose = self.get_ee_pose()
             phi = np.arctan2(self.desired_ee_pose.position.y, self.desired_ee_pose.position.x)
             quat = quaternion_from_euler(-np.pi, 0.0, 0.0)
             self.desired_ee_pose.orientation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
-            future = self.record_client.call_async(Empty.Request())
 
         self.prev_gesture = msg.data
 
@@ -267,17 +270,18 @@ class CvFrankaBridge(Node):
         # publish a text marker with the current gesture
         self.text_marker_publisher.publish(self.text_marker)
         self.bounding_box_publisher.publish(self.bounding_box_marker)
-        if self.move_robot:
+        if self.move_robot and self.current_waypoint is not None and self.offset is not None:
             # find the end-effector's position relative to the offset, which was
             # set the last time the user made a thumbs up gesture
+
             delta = Pose()
-            delta.position.x = (self.current_waypoint.position.x - self.offset.position.x) / 1000 # convert to meters
-            delta.position.y = (self.current_waypoint.position.y - self.offset.position.y) / 1000 # convert to meters
-            delta.position.z = (self.current_waypoint.position.z - self.offset.position.z) / 1000 # convert to meters
+            delta.position.x = (self.current_waypoint.position.x - self.offset.position.x)
+            delta.position.y = (self.current_waypoint.position.y - self.offset.position.y)
+            delta.position.z = (self.current_waypoint.position.z - self.offset.position.z)
 
             # Get the current and desired positions and orientations of the end-effector
-            self.desired_ee_pose.position.x = delta.position.y + self.initial_ee_pose.position.x
-            self.desired_ee_pose.position.y = delta.position.x + self.initial_ee_pose.position.y
+            self.desired_ee_pose.position.x = delta.position.x + self.initial_ee_pose.position.x
+            self.desired_ee_pose.position.y = delta.position.y + self.initial_ee_pose.position.y
             self.desired_ee_pose.position.z = delta.position.z + self.initial_ee_pose.position.z
 
         if (self.desired_ee_pose.position.x < self.x_limits[0] or self.desired_ee_pose.position.x > self.x_limits[1]):
