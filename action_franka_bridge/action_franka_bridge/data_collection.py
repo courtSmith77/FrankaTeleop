@@ -1,6 +1,15 @@
 """
 Collect data for training model.
 
+This node reads in image and position data during demonstrations and
+saves the data to train the models.
+
+PUBLISHERS:
+  + /desired_ee_pose (Pose) - The desired end effector position
+  + /d405/color/image_rect_raw (Image) - The end effector camera raw image feed
+  + /d435/color/image_raw (Image) - The scene camera raw image feed
+SERVICES:
+  + /record (Empty) - Enables saving the image and scene data
 """
 from geometry_msgs.msg import Pose
 from sensor_msgs.msg import Image
@@ -62,7 +71,7 @@ class DataCollection(Node):
         self.received_scene_image = True
 
     def record_callback(self, request, response):
-        """Callback for the strat recording callback"""
+        """Callback for the start recording callback"""
         self.start_recording = True
         self.get_logger().info('Starting to record...')
         return response
@@ -72,32 +81,33 @@ class DataCollection(Node):
 
         if self.start_recording:
 
-            if self.received_ee_pose and self.received_ee_image and self.received_scene_image and self.end:
-
+            if self.received_ee_pose:
+                """Record received pose."""
                 ee_data = [self.desired_ee.position.x, self.desired_ee.position.y, self.desired_ee.position.z]
                 with open(self.pos_data, mode='a') as csv_file:
                     csv_writer = csv.writer(csv_file)
                     csv_writer.writerow(ee_data)
-
+            
+            if self.received_ee_image:
+                """Record received ee image."""
                 ee_img_name = f'./data/ee_img_{self.count}.jpg'
-                scene_img_name = f'./data/scene_img_{self.count}.jpg'
-
                 cv.imwrite(ee_img_name, self.ee_image)
+
+            if self.received_scene_image:
+                """Record received scene image."""
+                scene_img_name = f'./data/scene_img_{self.count}.jpg'
                 cv.imwrite(scene_img_name, self.scene_image)
 
-                self.count+=1
+            self.count+=1
 
-                if self.count % 50 == 0:
-                    self.get_logger().info(f'Received {self.count} messages')
+            if self.count % 50 == 0:
+                self.get_logger().info(f'Received {self.count} messages')
 
 
 def main(args=None):
     rclpy.init(args=args)
-
     data_collection = DataCollection()
-
     rclpy.spin(data_collection)
-
 
 if __name__ == '__main__':
     main()

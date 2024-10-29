@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>cv_franka_bridge</name>
+  <name>action_franka_bridge</name>
   <version>0.0.0</version>
-  <description>A package to teleoperate a franka robot using computer vision</description>
-  <maintainer email="gclifford@u.northwestern.edu">Graham Clifford</maintainer>
+  <description>A package to operate a franka robot using diffusion policy</description>
+  <maintainer email="courtneysmith2024@u.northwestern.edu">Courtney Smith</maintainer>
   <license>APLv2</license>
 
   <depend>visualization_msgs</depend>

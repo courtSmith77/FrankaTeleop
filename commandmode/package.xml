@@ -3,14 +3,11 @@
 <package format="3">
   <name>commandmode</name>
   <version>0.0.1</version>
-  <description>"A package implementing computer vision with the Intel Realsense D435i Camera to recognize and find the 3D location of a human hand."</description>
-  <maintainer email="gclifford@u.northwestern.edu">Graham Clifford</maintainer>
+  <description>"A package to interface with a user via keyboard inputs to select command state."</description>
+  <maintainer email="courtneysmith2024@u.northwestern.edu">Courtney Smith</maintainer>
   <license>APLv2</license>
 
   <exec_depend>rclpy</exec_depend>
-  <exec_depend>pyautogui</exec_depend>
-
-  <depend>mediapipelib</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

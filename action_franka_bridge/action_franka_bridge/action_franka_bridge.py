@@ -1,24 +1,24 @@
 """
-Interpret gestures from the user, and convert waypoints into robot motion.
+Interpret command mode from user, and converts actions from the diffusion
+model into robot motion.
 
-This node interprets four gestures from a human user: thumbs up, thumbs down,
-closed fist, and open palm. These gestures are used to control whether or not
-the robot tracks the position of the users hand and to control the gripper.
-Waypoints received are transformed into the robot base link's frame. Two
-PD loops, one for position and one for orientation, are used to control the robot.
+This node interprets three command states from the user: Begin ('b'), Action
+('a'), Pause ('p' or 's'). These states are used to control whether or not the
+robot performs the actions from the subscribed /predicted_action topic. Actions
+and current robot pose are used within two PD loops, one for position and one for
+orientation, to control the robot.
 
 SUBSCRIBERS:
-  + /waypoint (PoseStamped) - The 3D location of the hand's pose.
-  + /right_gesture (String) - The gesture that the right hand is making.
+  + /predicted_action (Pose) - The next action position from the diffusion model.
+  + /command_mode (String) - The command mode based on the key pressed.
 PUBLISHERS:
-  + /text_marker (Marker) - The text marker that is published to the RViz.
+  + /text_marker (Marker) - The text marker that is published to RViz.
+  + /bounding_box (Marker) - The bounding box marker that is published to RViz.
+  + /desired_ee_pose (Pose) - The desired pose of the end effector.
 SERVICE CLIENTS:
   + /robot_waypoints (PlanPath) - The service that plans and executes the robot's
     motion.
-ACTION CLIENTS:
-  + /panda_gripper/homing (Homing) - The action server that homes the gripper.
-  + /panda_gripper/grasp (Grasp) - The action server that controls the gripper.
-
+  + /record (Empty) - The service that initiates recording the demonstration data.
 """
 from geometry_msgs.msg import Pose, PoseStamped, Point, Quaternion
 from franka_teleop.srv import PlanPath
@@ -40,10 +40,10 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 import numpy as np
 
-class CvFrankaBridge(Node):
+class ActionFrankaBridge(Node):
 
     def __init__(self):
-        super().__init__('cv_franka_bridge')
+        super().__init__('action_franka_bridge')
 
         # create callback groups
         self.waypoint_callback_group = MutuallyExclusiveCallbackGroup()
@@ -72,13 +72,11 @@ class CvFrankaBridge(Node):
         self.listener = TransformListener(self.buffer, self)
 
         # create class variables
-        self.text_marker = self.create_text_marker("Press 'b' to begin inference")
+        self.text_marker = self.create_text_marker("Press_'b'_to_begin_inference")
 
         self.current_waypoint = None
         self.previous_waypoint = None
         self.offset = None
-        # self.initial_ee_pose = Pose(position=Point(x=0.30674, y=-0.0014384, z=0.48529),
-        #                             orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
         self.initial_ee_pose = Pose(position=Point(x=0.12, y=0.402, z=0.080),
                                     orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
         self.desired_ee_pose = self.initial_ee_pose
@@ -91,6 +89,7 @@ class CvFrankaBridge(Node):
         self.lower_distance_threshold = 3.0
         self.upper_distance_threshold = 10.0
 
+        # PID parameters
         self.kp = 5.0
         self.ki = 0.0
         self.kd = 0.01
@@ -104,10 +103,6 @@ class CvFrankaBridge(Node):
         self.pitch_error_prior = 0
         self.yaw_error_prior = 0
 
-        # bounding box variables
-        # self.x_limits = [0.15, 0.65]
-        # self.y_limits = [-0.30, 0.30]
-        # self.z_limits = [0.05, 0.75]
         self.x_limits = [0.10, 1.0]
         self.y_limits = [-0.75, 0.75]
         self.z_limits = [0.07, 0.75]
@@ -224,22 +219,8 @@ class CvFrankaBridge(Node):
             self.current_waypoint = msg
 
     def command_mode_callback(self, msg):
-        """
-        Callback for the right gesture subscriber.
-
-        The right gesture is used to control the robot's motion and the gripper.
-        
-        Args:
-        ----
-        msg (String): The gesture that the right hand is making.
-
-        Returns:
-        -------
-        None
-
-        """
+        """Callback for the command mode subscriber."""
         if msg.data == "Begin" or msg.data == "Pause":
-            # if thumbs up, start tracking the user's hand
             if self.count == 0:
                 self.desired_ee_pose = self.get_ee_pose()
                 self.count += 1
@@ -251,15 +232,16 @@ class CvFrankaBridge(Node):
             self.count = 0
 
         if msg.data == "Pause":
+            # make sure robot does not move if the command mode is 'Pause'
             self.move_robot = False
-        elif self.prev_gesture == "Begin" and msg.data == "Action":
+
+        if self.prev_gesture == "Begin" and msg.data == "Action":
             self.get_logger().info('Allowing robot to move now, if actions are sent')
             self.move_robot = True
             self.offset_flag = True
-            # self.offset = self.current_waypoint
+
             self.initial_ee_pose = self.get_ee_pose()
             self.desired_ee_pose = self.get_ee_pose()
-            phi = np.arctan2(self.desired_ee_pose.position.y, self.desired_ee_pose.position.x)
             quat = quaternion_from_euler(-np.pi, 0.0, 0.0)
             self.desired_ee_pose.orientation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
 
@@ -270,10 +252,10 @@ class CvFrankaBridge(Node):
         # publish a text marker with the current gesture
         self.text_marker_publisher.publish(self.text_marker)
         self.bounding_box_publisher.publish(self.bounding_box_marker)
+
         if self.move_robot and self.current_waypoint is not None and self.offset is not None:
             # find the end-effector's position relative to the offset, which was
-            # set the last time the user made a thumbs up gesture
-
+            # set the last time the user pressed 'b' or 'a'
             delta = Pose()
             delta.position.x = (self.current_waypoint.position.x - self.offset.position.x)
             delta.position.y = (self.current_waypoint.position.y - self.offset.position.y)
@@ -284,6 +266,7 @@ class CvFrankaBridge(Node):
             self.desired_ee_pose.position.y = delta.position.y + self.initial_ee_pose.position.y
             self.desired_ee_pose.position.z = delta.position.z + self.initial_ee_pose.position.z
 
+        # Crop to bound area
         if (self.desired_ee_pose.position.x < self.x_limits[0] or self.desired_ee_pose.position.x > self.x_limits[1]):
             self.desired_ee_pose.position.x = self.x_limits[0] if self.desired_ee_pose.position.x < self.x_limits[0] else self.x_limits[1]
         if (self.desired_ee_pose.position.y < self.y_limits[0] or self.desired_ee_pose.position.y > self.y_limits[1]):
@@ -350,11 +333,8 @@ class CvFrankaBridge(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-
-    cv_franka_bridge = CvFrankaBridge()
-
-    rclpy.spin(cv_franka_bridge)
-
+    action_franka_bridge = ActionFrankaBridge()
+    rclpy.spin(action_franka_bridge)
 
 if __name__ == '__main__':
     main()

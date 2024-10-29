@@ -30,7 +30,7 @@ def generate_launch_description():
                 launch_arguments={'robot_ip': LaunchConfiguration("robot_ip"),
                                   'use_fake_hardware': LaunchConfiguration("use_fake_hardware"),
                                   'use_rviz': 'true',
-                                  'rviz_file': PathJoinSubstitution([FindPackageShare('cv_franka_bridge'),'config',LaunchConfiguration('rviz_file')])}.items(),
+                                  'rviz_file': PathJoinSubstitution([FindPackageShare('action_franka_bridge'),'config',LaunchConfiguration('rviz_file')])}.items(),
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([PathJoinSubstitution(
@@ -47,13 +47,13 @@ def generate_launch_description():
                 condition=IfCondition(LaunchConfiguration("use_realsense"))
             ),
             Node(
-                package="cv_franka_bridge",
-                executable="cv_franka_bridge",
+                package="action_franka_bridge",
+                executable="action_franka_bridge",
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("use_realsense")),
             ),
             Node(
-                package="cv_franka_bridge",
+                package="action_franka_bridge",
                 executable="data_collection",
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("collect_data")),

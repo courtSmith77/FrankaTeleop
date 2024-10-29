@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'cv_franka_bridge'
+package_name = 'action_franka_bridge'
 
 setup(
     name=package_name,
@@ -24,8 +24,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'cv_franka_bridge = cv_franka_bridge.cv_franka_bridge:main',
-            'data_collection = cv_franka_bridge.data_collection:main'
+            'action_franka_bridge = action_franka_bridge.action_franka_bridge:main',
+            'data_collection = action_franka_bridge.data_collection:main'
         ],
     },
 )

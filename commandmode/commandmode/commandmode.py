@@ -8,7 +8,7 @@ to trigger state updates.
 
 PUBLISHERS:
   + /command_mode (String) - The command mode for the key pressed.
-SERVICES:
+SERVICE CLIENTS:
   + /start_inference (Empty) - Enables inference with empty request
   + /start_action (Empty) - Enables action deployment with empty request
   + /stop_inference (Empty) - Disables inference with empty request
@@ -18,7 +18,6 @@ import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
-from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 from std_srvs.srv import Empty
 
@@ -72,7 +71,7 @@ class CommandMode(Node):
         self.command_mode = 'None'
 
     def getKey(self):
-
+        """Read keyboard inputs from the terminal or extern window."""
         try:
             tty.setraw(sys.stdin.fileno())
             rlist, _, _ = select([sys.stdin], [], [], self.timeout)
@@ -84,7 +83,7 @@ class CommandMode(Node):
             self.get_logger().info(f'ERROR: {e}')
         
     def check_keys(self):
-
+        """Check key press for hot keys and performs associated action."""
         if self.key == 'b':
 
             self.get_logger().info(f'Starting diffusion inference now.\r\n')
@@ -117,7 +116,7 @@ class CommandMode(Node):
             raise 'Node Terminated.'
 
     def timer_callback(self):
-        """Publish the annotated image and the waypoint for the arm"""
+        """Publish the command mode."""
         
         # listening for keys
         if self.listening:
@@ -131,11 +130,8 @@ class CommandMode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-
     commandmode = CommandMode()
-
     rclpy.spin(commandmode)
-
 
 if __name__ == '__main__':
     main()
