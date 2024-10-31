@@ -56,7 +56,7 @@ class CommandMode(Node):
 
 
         # create timer
-        self.timer = self.create_timer(1/30, self.timer_callback)
+        self.timer = self.create_timer(1.0/30.0, self.timer_callback)
 
         # keyboard hot keys
         self.get_logger().info("Press the letter 'b' to begin diffusion inference.\n")

@@ -21,6 +21,7 @@ from cv_bridge import CvBridge
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rcl_interfaces.msg import ParameterDescriptor
 
 import csv
 
@@ -28,6 +29,10 @@ class DataCollection(Node):
 
     def __init__(self):
         super().__init__('data_collection')
+
+        # frequency parameter
+        self.declare_parameter('frequency', 10.0, ParameterDescriptor(description='Frequency (hz) of the timer callback'))
+        self.timer_freqency = self.get_parameter('frequency').get_parameter_value().double_value
 
         # create callback groups
         self.desired_callback_group = MutuallyExclusiveCallbackGroup()
@@ -41,7 +46,7 @@ class DataCollection(Node):
         self.record_srv = self.create_service(Empty, '/record', self.record_callback)
 
         # create timer
-        self.timer = self.create_timer(1/30, self.timer_callback)
+        self.timer = self.create_timer((1.0/self.timer_freqency), self.timer_callback)
 
         self.bridge = CvBridge()
 

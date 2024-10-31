@@ -23,6 +23,8 @@ def generate_launch_description():
                                   description="whether or not to run franka teleop."),
             DeclareLaunchArgument(name="rviz_file", default_value="integrate_servo.rviz",
                                   description="rviz file to use."),
+            DeclareLaunchArgument(name="frequency", default_value="10.0",
+                                  description="the frequency of the nodes (action_franka_bridge and franka_servo)."),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([PathJoinSubstitution(
                     [FindPackageShare('franka_teleop'), 'launch', 'franka_rviz.launch.py'])]),
@@ -38,7 +40,8 @@ def generate_launch_description():
                 condition=IfCondition(LaunchConfiguration("run_franka_teleop")),
                 launch_arguments={'robot_ip': LaunchConfiguration("robot_ip"),
                                   'use_fake_hardware': LaunchConfiguration("use_fake_hardware"),
-                                  'use_rviz': 'false'}.items(),
+                                  'use_rviz': 'false',
+                                  'frequency': LaunchConfiguration("frequency")}.items(),
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([PathJoinSubstitution(
@@ -51,12 +54,14 @@ def generate_launch_description():
                 executable="action_franka_bridge",
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("use_realsense")),
+                parameters=[{"frequency": LaunchConfiguration("frequency")}],
             ),
             Node(
                 package="action_franka_bridge",
                 executable="data_collection",
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("collect_data")),
+                parameters=[{"frequency": LaunchConfiguration("frequency")}],
             ),
         ]
     )
