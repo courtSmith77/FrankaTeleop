@@ -12,6 +12,7 @@ from cv_bridge import CvBridge
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rcl_interfaces.msg import ParameterDescriptor
 
 import csv
 
@@ -19,6 +20,10 @@ class DataCollection(Node):
 
     def __init__(self):
         super().__init__('data_collection')
+
+        # frequency parameter
+        self.declare_parameter('frequency', 10.0, ParameterDescriptor(description='Frequency (hz) of the timer callback'))
+        self.timer_freqency = self.get_parameter('frequency').get_parameter_value().double_value
 
         # create callback groups
         self.desired_callback_group = MutuallyExclusiveCallbackGroup()
@@ -72,23 +77,27 @@ class DataCollection(Node):
 
         if self.start_recording:
 
-            if self.received_ee_pose and self.received_ee_image and self.received_scene_image and self.end:
-
+            if self.received_ee_pose:
+                """Record received pose."""
                 ee_data = [self.desired_ee.position.x, self.desired_ee.position.y, self.desired_ee.position.z]
                 with open(self.pos_data, mode='a') as csv_file:
                     csv_writer = csv.writer(csv_file)
                     csv_writer.writerow(ee_data)
-
+            
+            if self.received_ee_image:
+                """Record received ee image."""
                 ee_img_name = f'./data/ee_img_{self.count}.jpg'
-                scene_img_name = f'./data/scene_img_{self.count}.jpg'
-
                 cv.imwrite(ee_img_name, self.ee_image)
+
+            if self.received_scene_image:
+                """Record received scene image."""
+                scene_img_name = f'./data/scene_img_{self.count}.jpg'
                 cv.imwrite(scene_img_name, self.scene_image)
 
-                self.count+=1
+            self.count+=1
 
-                if self.count % 50 == 0:
-                    self.get_logger().info(f'Received {self.count} messages')
+            if self.count % 50 == 0:
+                self.get_logger().info(f'Received {self.count} messages')
 
 
 def main(args=None):

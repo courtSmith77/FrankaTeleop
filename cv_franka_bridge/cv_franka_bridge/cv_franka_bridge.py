@@ -37,6 +37,7 @@ from tf_transformations import quaternion_from_euler, euler_from_quaternion
 import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rcl_interfaces.msg import ParameterDescriptor
 
 import numpy as np
 
@@ -44,6 +45,10 @@ class CvFrankaBridge(Node):
 
     def __init__(self):
         super().__init__('cv_franka_bridge')
+
+        # frequency parameter
+        self.declare_parameter('frequency', 10.0, ParameterDescriptor(description='Frequency (hz) of the timer callback'))
+        self.timer_freqency = self.get_parameter('frequency').get_parameter_value().double_value
 
         # create callback groups
         self.waypoint_callback_group = MutuallyExclusiveCallbackGroup()
@@ -79,7 +84,7 @@ class CvFrankaBridge(Node):
         self.offset = None
         # self.initial_ee_pose = Pose(position=Point(x=0.30674, y=-0.0014384, z=0.48529),
         #                             orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
-        self.initial_ee_pose = Pose(position=Point(x=0.12, y=0.402, z=0.080),
+        self.initial_ee_pose = Pose(position=Point(x=0.40, y=0.40, z=0.085),
                                     orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
         self.desired_ee_pose = self.initial_ee_pose
         self.waypoints = []
@@ -107,8 +112,9 @@ class CvFrankaBridge(Node):
         # self.x_limits = [0.15, 0.65]
         # self.y_limits = [-0.30, 0.30]
         # self.z_limits = [0.05, 0.75]
-        self.x_limits = [0.10, 1.0]
+        self.x_limits = [0.15, 1.0]
         self.y_limits = [-0.75, 0.75]
+        self.y_inner = [-0.15, 0.15]
         self.z_limits = [0.07, 0.75]
         self.bounding_box_marker = self.create_box_marker()
 
@@ -255,7 +261,6 @@ class CvFrankaBridge(Node):
             self.offset = self.current_waypoint
             self.initial_ee_pose = self.get_ee_pose()
             self.desired_ee_pose = self.get_ee_pose()
-            phi = np.arctan2(self.desired_ee_pose.position.y, self.desired_ee_pose.position.x)
             quat = quaternion_from_euler(-np.pi, 0.0, 0.0)
             self.desired_ee_pose.orientation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
             future = self.record_client.call_async(Empty.Request())
@@ -287,16 +292,17 @@ class CvFrankaBridge(Node):
         if (self.desired_ee_pose.position.z < self.z_limits[0] or self.desired_ee_pose.position.z > self.z_limits[1]):
             self.desired_ee_pose.position.z = self.z_limits[0] if self.desired_ee_pose.position.z < self.z_limits[0] else self.z_limits[1]
 
-        # publish desired ee pose for data collection
-        self.desired_ee_pub.publish(self.desired_ee_pose)
-
         try:
             ee_pose = self.get_ee_pose()
         except AttributeError as e:
             return
+        
+        # publish desired ee pose for data collection
+        self.desired_ee_pub.publish(ee_pose)
 
         current_euler = list(euler_from_quaternion([ee_pose.orientation.x, ee_pose.orientation.y, ee_pose.orientation.z, ee_pose.orientation.w]))
-        desired_euler = list(euler_from_quaternion([self.desired_ee_pose.orientation.x, self.desired_ee_pose.orientation.y, self.desired_ee_pose.orientation.z, self.desired_ee_pose.orientation.w]))
+        # desired_euler = list(euler_from_quaternion([self.desired_ee_pose.orientation.x, self.desired_ee_pose.orientation.y, self.desired_ee_pose.orientation.z, self.desired_ee_pose.orientation.w]))
+        desired_euler = list(euler_from_quaternion([1.0, 0.0, 0.0, 0.0]))
 
         # Orientation PID loops
         if current_euler[0] < 0:

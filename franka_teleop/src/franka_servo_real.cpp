@@ -41,6 +41,11 @@ int main(int argc, char* argv[])
   // The servo object expects to get a ROS node.
   const rclcpp::Node::SharedPtr demo_node = std::make_shared<rclcpp::Node>("franka_servo");
 
+  // get frequency from the launch file
+  demo_node->declare_parameter<double>("frequency", 10.0);
+  double freq;
+  demo_node->get_parameter("frequency", freq);
+
   // create services
   rclcpp::Service<franka_teleop::srv::PlanPath>::SharedPtr service = demo_node->create_service<franka_teleop::srv::PlanPath>(
       "robot_waypoints", &waypoint_callback);
@@ -98,7 +103,7 @@ int main(int argc, char* argv[])
   tracker_thread.detach();
 
   // Frequency at which commands will be sent to the robot controller.
-  rclcpp::WallRate command_rate(50);
+  rclcpp::WallRate command_rate(freq);
   RCLCPP_INFO_STREAM(demo_node->get_logger(), servo.getStatusMessage());
 
   while (rclcpp::ok())
