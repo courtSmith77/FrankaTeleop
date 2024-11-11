@@ -17,6 +17,9 @@ using std::placeholders::_1, std::placeholders::_2;
 using namespace moveit_servo;
 
 static Eigen::Vector3d linear_step_size{0.00, 0.00, 0.00};
+static Eigen::AngleAxisd x_step_size(0.00, Eigen::Vector3d::UnitX());
+static Eigen::AngleAxisd y_step_size(0.00, Eigen::Vector3d::UnitY());
+static Eigen::AngleAxisd z_step_size(0.00, Eigen::Vector3d::UnitZ());
 static Eigen::AngleAxisd angular_step_size(0.00, Eigen::Vector3d::UnitY());
 bool move_robot = false;
 
@@ -30,7 +33,10 @@ void waypoint_callback(const std::shared_ptr<franka_teleop::srv::PlanPath::Reque
     request->waypoint.pose.position.y,
     request->waypoint.pose.position.z};
 
-    angular_step_size = Eigen::AngleAxisd(0.001, Eigen::Vector3d::UnitY());
+    // angular_step_size = Eigen::AngleAxisd(0.001, Eigen::Vector3d::UnitY());
+    x_step_size = Eigen::AngleAxisd(request->angles[0], Eigen::Vector3d::UnitX());
+    y_step_size = Eigen::AngleAxisd(request->angles[1], Eigen::Vector3d::UnitY());
+    z_step_size = Eigen::AngleAxisd(request->angles[2], Eigen::Vector3d::UnitZ());
 }
 
 int main(int argc, char* argv[])
@@ -44,7 +50,7 @@ int main(int argc, char* argv[])
   const rclcpp::Node::SharedPtr demo_node = std::make_shared<rclcpp::Node>("franka_servo");
 
   // get frequency from the launch file
-  demo_node->declare_parameter<double>("frequency", 10.0);
+  demo_node->declare_parameter<double>("frequency", 30.0);
   double freq;
   demo_node->get_parameter("frequency", freq);
 
@@ -114,7 +120,10 @@ int main(int argc, char* argv[])
       std::lock_guard<std::mutex> pguard(pose_guard);
       target_pose.pose = servo.getEndEffectorPose();
       target_pose.pose.translate(linear_step_size);
-      target_pose.pose.rotate(angular_step_size);
+      // target_pose.pose.rotate(angular_step_size);
+      target_pose.pose.rotate(x_step_size);
+      target_pose.pose.rotate(y_step_size);
+      target_pose.pose.rotate(z_step_size);
 
       rclcpp::spin_some(demo_node);
     }

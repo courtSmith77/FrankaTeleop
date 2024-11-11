@@ -26,7 +26,7 @@ from franka_teleop.srv import PlanPath
 from visualization_msgs.msg import Marker
 
 from std_srvs.srv import Empty
-from std_msgs.msg import String
+from std_msgs.msg import String, Float32MultiArray
 
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
@@ -40,6 +40,7 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
 
 import numpy as np
+import csv
 
 class ActionFrankaBridge(Node):
 
@@ -55,13 +56,12 @@ class ActionFrankaBridge(Node):
         self.command_mode_callback_group = MutuallyExclusiveCallbackGroup()
 
         # create subscribers
-        self.action_subscriber = self.create_subscription(Pose, 'predicted_action', self.action_callback, 10, callback_group=self.waypoint_callback_group)
+        self.action_subscriber = self.create_subscription(Float32MultiArray, 'predicted_action', self.action_callback, 10, callback_group=self.waypoint_callback_group)
         self.command_mode_subscriber = self.create_subscription(String, 'command_mode', self.command_mode_callback, 10, callback_group=self.command_mode_callback_group)
 
         # create publishers
         self.text_marker_publisher = self.create_publisher(Marker, 'text_marker', 10)
         self.bounding_box_publisher = self.create_publisher(Marker, 'bounding_box', 10)
-        self.desired_ee_pub = self.create_publisher(Pose, 'desired_ee_pose', 10)
 
         # create clients
         self.waypoint_client = self.create_client(PlanPath, 'robot_waypoints')
@@ -85,8 +85,13 @@ class ActionFrankaBridge(Node):
         self.move_robot = False
         self.prev_gesture = None
 
+        # action variables
+        self.pending_action = False
+        self.action_array = None
+        self.action_counter = 0
+
         self.lower_distance_threshold = 0.0
-        self.upper_distance_threshold = 0.06
+        self.upper_distance_threshold = 0.05
 
         # PID parameters
         self.kp_angle = 1.0
@@ -97,7 +102,7 @@ class ActionFrankaBridge(Node):
         self.yaw_error_prior = 0
 
         self.x_limits = [0.15, 1.0]
-        self.y_limits = [-0.75, 0.75]
+        self.y_limits = [-0.75, 0.6]
         self.y_inner = [-0.15, 0.15]
         self.z_limits = [0.07, 0.75]
         self.bounding_box_marker = self.create_box_marker()
@@ -177,50 +182,88 @@ class ActionFrankaBridge(Node):
 
     def get_ee_pose(self):
         """Get the current pose of the end-effector."""
-        ee_home_pos, ee_home_rot = self.get_transform("panda_link0", "panda_hand_tcp")
-        ee_pose = Pose()
-        ee_pose.position.x = ee_home_pos.x
-        ee_pose.position.y = ee_home_pos.y
-        ee_pose.position.z = ee_home_pos.z
-        ee_pose.orientation.x = ee_home_rot.x
-        ee_pose.orientation.y = ee_home_rot.y
-        ee_pose.orientation.z = ee_home_rot.z
-        ee_pose.orientation.w = ee_home_rot.w
-        return ee_pose
+
+        try:
+            ee_home_pos, ee_home_rot = self.get_transform("panda_link0", "panda_hand_tcp")
+            ee_pose = Pose()
+            ee_pose.position.x = ee_home_pos.x
+            ee_pose.position.y = ee_home_pos.y
+            ee_pose.position.z = ee_home_pos.z
+            ee_pose.orientation.x = ee_home_rot.x
+            ee_pose.orientation.y = ee_home_rot.y
+            ee_pose.orientation.z = ee_home_rot.z
+            ee_pose.orientation.w = ee_home_rot.w
+            return ee_pose
+        except:
+            self.get_logger().info('Replacing EE pose with Desired Pose')
+            return self.desired_ee_pose
+
+    def angle_correction(self, current_euler, desired_euler):
+        """Calculate the angle corrections."""
+
+        # Orientation PID loops
+        if current_euler[0] < 0:
+            current_euler[0] += 2 * np.pi
+        if desired_euler[0] < 0:
+            desired_euler[0] += 2 * np.pi
+        roll_error = desired_euler[0] - current_euler[0]
+        pitch_error = desired_euler[1] - current_euler[1]
+        yaw_error = desired_euler[2] - current_euler[2]
+
+        roll_derivative = (roll_error - self.roll_error_prior)
+        pitch_derivative = (pitch_error - self.pitch_error_prior)
+        yaw_derivative = (yaw_error - self.yaw_error_prior)
+
+        roll_output = self.kp_angle * roll_error - self.kd_angle * roll_derivative
+        pitch_output = self.kp_angle * pitch_error + self.kd_angle * pitch_derivative
+        yaw_output = self.kp_angle * yaw_error + self.kd_angle * yaw_derivative
+
+        euler_output = [roll_output, -pitch_output, -yaw_output]
+
+        self.roll_error_prior = roll_error
+        self.pitch_error_prior = pitch_error
+        self.yaw_error_prior = yaw_error
+
+        return euler_output
+
+    def check_boundaries(self):
+        """Check for boundary limits."""
+
+        if (self.desired_ee_pose.position.x < self.x_limits[0] or self.desired_ee_pose.position.x > self.x_limits[1]):
+            self.desired_ee_pose.position.x = self.x_limits[0] if self.desired_ee_pose.position.x < self.x_limits[0] else self.x_limits[1]
+            self.get_logger().info('Trying to go to far out of X')
+        if (self.desired_ee_pose.position.y < self.y_limits[0] or self.desired_ee_pose.position.y > self.y_limits[1]):
+            self.desired_ee_pose.position.y = self.y_limits[0] if self.desired_ee_pose.position.y < self.y_limits[0] else self.y_limits[1]
+            self.get_logger().info('Trying to go to far out of Y')
+        if ((self.desired_ee_pose.position.y < self.y_inner[1] and self.desired_ee_pose.position.y > self.y_inner[0]) and self.desired_ee_pose.position.x < self.x_limits[0]):
+            self.get_logger().info('Too close to base!!!!!!!!!!!!!')
+            upper_diff = abs(self.y_inner[1] - self.desired_ee_pose.position.y)
+            lower_diff = abs(self.y_inner[0] - self.desired_ee_pose.position.y)
+            if upper_diff < lower_diff:
+                self.desired_ee_pose.position.y = self.y_inner[1]
+            else:
+                self.desired_ee_pose.position.y = self.y_inner[0]
+        if (self.desired_ee_pose.position.z < self.z_limits[0] or self.desired_ee_pose.position.z > self.z_limits[1]):
+            self.desired_ee_pose.position.z = self.z_limits[0] if self.desired_ee_pose.position.z < self.z_limits[0] else self.z_limits[1]
 
     def action_callback(self, msg):
         """Callback for the action subscriber."""
 
-        if self.move_robot:
+        # only save action once previous action set is done executing
+        if not self.pending_action:
+            arr = msg.data
+            rows = msg.layout.dim[0].size
+            cols = msg.layout.dim[1].size
 
-                current_pos = self.get_ee_pose()
-                diff_vector = np.array([msg.position.x, msg.position.y]) - np.array([current_pos.position.x, current_pos.position.y])
-                distance = np.linalg.norm(diff_vector)
-                
-                self.get_logger().info(f'Distance = {distance}')
-                
-                if distance < self.lower_distance_threshold:
-                    self.get_logger().info("Trying to move too close. Staying still.")
-                    self.desired_ee_pose = self.get_ee_pose()
-                elif distance > self.upper_distance_threshold:
-                    self.get_logger().info("Trying to move too far, clipping.")
+            self.action_array = np.array(arr).reshape((rows,cols))
+            # with open('./actions_executed.csv', mode='a') as csv_file:
+            #     csv_writer = csv.writer(csv_file)
+            #     csv_writer.writerows(self.action_array)
+            self.pending_action = True
 
-                    coeff = self.upper_distance_threshold/distance
-                    converted_vector = coeff*diff_vector + np.array([current_pos.position.x, current_pos.position.y])
-                    self.desired_ee_pose.position.x = converted_vector[0]
-                    self.desired_ee_pose.position.y = converted_vector[1]
-                    
-                    self.get_logger().info(f"Clipped by {coeff}.")
-                    self.get_logger().info(f'Original Desired position: x={self.desired_ee_pose.position.x}, y={self.desired_ee_pose.position.y}')
-                    self.get_logger().info(f'Converted Desired position: x={self.desired_ee_pose.position.x}, y={self.desired_ee_pose.position.y}')
-                else:
-                    self.desired_ee_pose.position.x = msg.position.x
-                    self.desired_ee_pose.position.y = msg.position.y
-
-        else:
-
-            self.desired_ee_pose = self.get_ee_pose()
-
+            # self.get_logger().info(f'Original Message Arr = {arr}')
+            # self.get_logger().info(f'Number of actions received = {self.action_array.shape[0]}')
+            self.get_logger().info(f'Action pairs = {self.action_array}')
 
     def command_mode_callback(self, msg):
         """Callback for the command mode subscriber."""
@@ -249,70 +292,80 @@ class ActionFrankaBridge(Node):
         self.text_marker_publisher.publish(self.text_marker)
         self.bounding_box_publisher.publish(self.bounding_box_marker)
 
-        # Crop to bound area
-        if (self.desired_ee_pose.position.x < self.x_limits[0] or self.desired_ee_pose.position.x > self.x_limits[1]):
-            self.desired_ee_pose.position.x = self.x_limits[0] if self.desired_ee_pose.position.x < self.x_limits[0] else self.x_limits[1]
-        if (self.desired_ee_pose.position.y < self.y_limits[0] or self.desired_ee_pose.position.y > self.y_limits[1]):
-            self.desired_ee_pose.position.y = self.y_limits[0] if self.desired_ee_pose.position.y < self.y_limits[0] else self.y_limits[1]
-        if ((self.desired_ee_pose.position.y < self.y_inner[1] and self.desired_ee_pose.position.y > self.y_inner[0]) and self.desired_ee_pose.position.x < self.x_limits[0]):
-            self.get_logger().info('Too close to base!!!!!!!!!!!!!')
-            upper_diff = abs(self.y_inner[1] - self.desired_ee_pose.position.y)
-            lower_diff = abs(self.y_inner[0] - self.desired_ee_pose.position.y)
-            if upper_diff < lower_diff:
-                self.desired_ee_pose.position.y = self.y_inner[1]
+        if self.move_robot:
+            # self.get_logger().info('Can Move Robot!!!')
+                
+            if self.action_array is not None and self.action_counter < self.action_array.shape[0] and self.pending_action:
+                # self.get_logger().info(f'Pulling from action array = {self.action_array}')
+
+                desired_x = float(self.action_array[self.action_counter][0])
+                desired_y = float(self.action_array[self.action_counter][1])
+
+                current_pos = self.get_ee_pose()
+                diff_vector = np.array([desired_x, desired_y]) - np.array([current_pos.position.x, current_pos.position.y])
+                distance = np.linalg.norm(diff_vector)
+                
+                if distance < self.lower_distance_threshold:
+                    self.get_logger().info("Trying to move too close. Staying still.")
+                    self.desired_ee_pose = self.get_ee_pose()
+                elif distance > self.upper_distance_threshold:
+                    self.get_logger().info("Trying to move too far, clipping.")
+
+                    coeff = self.upper_distance_threshold/distance
+                    converted_vector = coeff*diff_vector + np.array([current_pos.position.x, current_pos.position.y])
+                    self.desired_ee_pose.position.x = converted_vector[0]
+                    self.desired_ee_pose.position.y = converted_vector[1]
+                    
+                else:
+                    self.desired_ee_pose.position.x = desired_x
+                    self.desired_ee_pose.position.y = desired_y
+                
+                self.action_counter +=1
+
+                self.get_logger().info(f'From Action, desired: x={self.desired_ee_pose.position.x}, y={self.desired_ee_pose.position.y}')
+
             else:
-                self.desired_ee_pose.position.y = self.y_inner[0]
-        if (self.desired_ee_pose.position.z < self.z_limits[0] or self.desired_ee_pose.position.z > self.z_limits[1]):
-            self.desired_ee_pose.position.z = self.z_limits[0] if self.desired_ee_pose.position.z < self.z_limits[0] else self.z_limits[1]
+                self.pending_action = False
+                self.action_counter = 0
+                self.desired_ee_pose = self.get_ee_pose()
+                self.get_logger().info('Only using EE for desired (robot move = true)')
+
+        else:
+
+            self.desired_ee_pose = self.get_ee_pose()
+            self.get_logger().info('Only using EE for desired (robot move = false)')
+
+
+        # Crop to bound area
+        self.check_boundaries()
 
         try:
             ee_pose = self.get_ee_pose()
         except AttributeError as e:
             return
-        
-        # publish actual ee pose for diffusion and data collect
-        self.desired_ee_pub.publish(ee_pose)
 
-        current_euler = list(euler_from_quaternion([ee_pose.orientation.x, ee_pose.orientation.y, ee_pose.orientation.z, ee_pose.orientation.w]))
-        desired_euler = list(euler_from_quaternion([1.0, 0.0, 0.0, 0.0]))
+        # Use PID to correct angles
+        current_angles = list(euler_from_quaternion([ee_pose.orientation.x, ee_pose.orientation.y, ee_pose.orientation.z, ee_pose.orientation.w]))
+        desired_angles = list(euler_from_quaternion([1.0, 0.0, 0.0, 0.0]))
+        euler_output = self.angle_correction(current_angles, desired_angles)
 
-        # Orientation PID loops
-        if current_euler[0] < 0:
-            current_euler[0] += 2 * np.pi
-        if desired_euler[0] < 0:
-            desired_euler[0] += 2 * np.pi
-        roll_error = desired_euler[0] - current_euler[0]
-        pitch_error = desired_euler[1] - current_euler[1]
-        yaw_error = desired_euler[2] - current_euler[2]
+        self.get_logger().info(f'Desired_pos: x={self.desired_ee_pose.position.x} y={self.desired_ee_pose.position.y} z={0.085}')
+        self.get_logger().info(f'EE_pos:      x={ee_pose.position.x} y={ee_pose.position.y} z={ee_pose.position.z}')
 
-        roll_derivative = (roll_error - self.roll_error_prior)
-        pitch_derivative = (pitch_error - self.pitch_error_prior)
-        yaw_derivative = (yaw_error - self.yaw_error_prior)
-
-        roll_output = self.kp_angle * roll_error - self.kd_angle * roll_derivative
-        pitch_output = self.kp_angle * pitch_error + self.kd_angle * pitch_derivative
-        yaw_output = self.kp_angle * yaw_error + self.kd_angle * yaw_derivative
-
-        euler_output = [roll_output, -pitch_output, -yaw_output]
-
-        self.roll_error_prior = roll_error
-        self.pitch_error_prior = pitch_error
-        self.yaw_error_prior = yaw_error
-
-        self.get_logger().info(f'Desired_pos: x={self.desired_ee_pose.position.x} y={self.desired_ee_pose.position.y} z={self.desired_ee_pose.position.z}')
-
+        # Publish Requested Path
         robot_move = PoseStamped()
         robot_move.header.frame_id = "panda_link0"
         robot_move.header.stamp = self.get_clock().now().to_msg()
         robot_move.pose.position.x = np.round((self.desired_ee_pose.position.x - ee_pose.position.x),4)
         robot_move.pose.position.y = np.round(-(self.desired_ee_pose.position.y - ee_pose.position.y),4)
-        robot_move.pose.position.z = np.round(-(self.desired_ee_pose.position.z - ee_pose.position.z),4)
+        robot_move.pose.position.z = np.round(-(0.085 - ee_pose.position.z)/2.0,4)
 
         planpath_request = PlanPath.Request()
         planpath_request.waypoint = robot_move
         planpath_request.angles = euler_output
         future = self.waypoint_client.call_async(planpath_request)
         self.get_logger().info(f'Executing: x={robot_move.pose.position.x}, y={robot_move.pose.position.y}, z={robot_move.pose.position.z}')
+        self.get_logger().info(f'Executing: roll={euler_output[0]}, pitch={euler_output[1]}, yaw={euler_output[2]}')
 
 def main(args=None):
     rclpy.init(args=args)
@@ -321,21 +374,6 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

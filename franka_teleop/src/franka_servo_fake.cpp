@@ -12,8 +12,8 @@
 #include <atomic>
 #include "rclcpp/rclcpp.hpp"
 #include <chrono>
-#include <moveit_servo/moveit_servo/servo.hpp>
-#include <moveit_servo/moveit_servo/utils/common.hpp>
+#include <moveit_servo/servo.hpp>
+#include <moveit_servo/utils/common.hpp>
 #include <mutex>
 #include <std_srvs/srv/empty.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -53,7 +53,7 @@ int main(int argc, char* argv[])
   const rclcpp::Node::SharedPtr demo_node = std::make_shared<rclcpp::Node>("franka_servo");
 
   // get frequency from the launch file
-  demo_node->declare_parameter<double>("frequency", 10.0);
+  demo_node->declare_parameter<double>("frequency", 30.0);
   double freq;
   demo_node->get_parameter("frequency", freq);
 

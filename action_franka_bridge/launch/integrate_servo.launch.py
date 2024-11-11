@@ -63,5 +63,11 @@ def generate_launch_description():
                 condition=IfCondition(LaunchConfiguration("collect_data")),
                 parameters=[{"frequency": LaunchConfiguration("frequency")}],
             ),
+            Node(
+                package="action_franka_bridge",
+                executable="model_input_publisher",
+                output="screen",
+                condition=IfCondition(LaunchConfiguration("use_realsense")),
+            ),
         ]
     )

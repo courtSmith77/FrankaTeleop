@@ -25,7 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'action_franka_bridge = action_franka_bridge.action_franka_bridge:main',
-            'data_collection = action_franka_bridge.data_collection:main'
+            'data_collection = action_franka_bridge.data_collection:main',
+            'model_input_publisher = action_franka_bridge.model_input_publisher:main'
         ],
     },
 )
