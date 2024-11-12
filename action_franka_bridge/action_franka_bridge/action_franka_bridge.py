@@ -341,6 +341,7 @@ class ActionFrankaBridge(Node):
 
         try:
             ee_pose = self.get_ee_pose()
+            self.get_logger().info(f'EE orientation = {ee_pose.orientation}')
         except AttributeError as e:
             return
 
@@ -348,6 +349,10 @@ class ActionFrankaBridge(Node):
         current_angles = list(euler_from_quaternion([ee_pose.orientation.x, ee_pose.orientation.y, ee_pose.orientation.z, ee_pose.orientation.w]))
         desired_angles = list(euler_from_quaternion([1.0, 0.0, 0.0, 0.0]))
         euler_output = self.angle_correction(current_angles, desired_angles)
+        
+        # for ii, angle in enumerate(euler_output):
+        #     if angle > 0.1:
+        #         euler_output[ii] = 0.1
 
         self.get_logger().info(f'Desired_pos: x={self.desired_ee_pose.position.x} y={self.desired_ee_pose.position.y} z={0.085}')
         self.get_logger().info(f'EE_pos:      x={ee_pose.position.x} y={ee_pose.position.y} z={ee_pose.position.z}')

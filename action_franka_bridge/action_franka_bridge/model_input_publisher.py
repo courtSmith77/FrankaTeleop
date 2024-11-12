@@ -47,10 +47,12 @@ class ModelInputPublisher(Node):
 
         # create subscribers
         self.scene_img_sub = self.create_subscription(Image, '/d435/color/image_raw', self.scene_image_callback, 10)
+        self.ee_img_sub = self.create_subscription(Image, '/d405/color/image_rect_raw',  self.ee_image_callback, 10)
 
         # create publishers
         self.desired_ee_pub = self.create_publisher(Pose, 'desired_ee_pose', 10)
         self.scene_img_pub = self.create_publisher(Image, 'scene_image_obs', 10)
+        self.ee_img_pub = self.create_publisher(Image, 'ee_image_obs', 10)
 
         # create timer
         self.timer = self.create_timer((1.0/self.timer_freqency), self.timer_callback)
@@ -62,6 +64,9 @@ class ModelInputPublisher(Node):
         self.bridge = CvBridge()
 
         self.current_scene_img = None
+        self.current_ee_img = None
+        self.scene_flag = False
+        self.ee_flag = False
 
     def get_transform(self, target_frame, source_frame):
         """Get the transform between two frames."""
@@ -106,6 +111,17 @@ class ModelInputPublisher(Node):
         small_img = cv2.resize(crop_img, (110,70))
 
         self.current_scene_img = small_img
+        self.scene_flag = True
+
+    def ee_image_callback(self, msg):
+        """Get the current ee image from the realsense."""
+
+        # TODO: make image size not hard coded
+        img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        small_img = cv2.resize(img, (212,120))
+
+        self.current_ee_img = small_img
+        self.ee_flag = True
 
     def timer_callback(self):
         """Callback for the timer."""
@@ -119,8 +135,13 @@ class ModelInputPublisher(Node):
 
         # publish transformed scene image
         if self.current_scene_img is not None:
-            img_msg = self.bridge.cv2_to_imgmsg(self.current_scene_img, encoding='bgr8')
-            self.scene_img_pub.publish(img_msg)
+            scene_img_msg = self.bridge.cv2_to_imgmsg(self.current_scene_img, encoding='bgr8')
+            self.scene_img_pub.publish(scene_img_msg)
+
+        # publish transformed scene image
+        if self.current_ee_img is not None:
+            ee_img_msg = self.bridge.cv2_to_imgmsg(self.current_ee_img, encoding='bgr8')
+            self.ee_img_pub.publish(ee_img_msg)
 
 
 def main(args=None):

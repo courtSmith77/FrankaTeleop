@@ -14,6 +14,7 @@ setup(
         ('share/' + package_name + '/config', ['config/integrate.rviz']),
         ('share/' + package_name + '/config', ['config/integrate_servo.rviz']),
         ('share/' + package_name + '/config', ['config/2vids.rviz']),
+        ('share/' + package_name + '/config', ['config/multi_img.rviz']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
