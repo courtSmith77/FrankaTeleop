@@ -54,6 +54,8 @@ class CommandMode(Node):
         self.action_stop_client = self.create_client(Empty, 'stop_action')
         self.action_stop_client.wait_for_service(timeout_sec=2.0)
 
+        self.record_client = self.create_client(Empty, 'record')
+        self.record_client.wait_for_service(timeout_sec=2.0)
 
         # create timer
         self.timer = self.create_timer(1.0/30.0, self.timer_callback)
@@ -95,6 +97,7 @@ class CommandMode(Node):
             self.get_logger().info('Starting diffusion actions now.\r\n')
             self.command_mode = 'Action'
             future = self.action_start_client.call_async(Empty.Request())
+            future = self.record_client.call_async(Empty.Request())
 
         elif self.key == 'p':
 

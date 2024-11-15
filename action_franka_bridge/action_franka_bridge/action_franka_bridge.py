@@ -63,11 +63,14 @@ class ActionFrankaBridge(Node):
         self.text_marker_publisher = self.create_publisher(Marker, 'text_marker', 10)
         self.bounding_box_publisher = self.create_publisher(Marker, 'bounding_box', 10)
 
+        # publishers for actions
+        self.current_action_pub = self.create_publisher(Float32MultiArray, 'current_action', 10)
+        self.ee_at_action_pub = self.create_publisher(Float32MultiArray, 'ee_before_action', 10)
+        self.ee_all_time_pub = self.create_publisher(Float32MultiArray, 'ee_all_time', 10)
+
         # create clients
         self.waypoint_client = self.create_client(PlanPath, 'robot_waypoints')
         self.waypoint_client.wait_for_service(timeout_sec=2.0)
-        self.record_client = self.create_client(Empty, 'record')
-        self.record_client.wait_for_service(timeout_sec=2.0)
 
         # create timer
         self.timer = self.create_timer((1.0/self.timer_freqency), self.timer_callback)
@@ -108,6 +111,7 @@ class ActionFrankaBridge(Node):
         self.bounding_box_marker = self.create_box_marker()
 
         self.count = 0
+        self.got_tf = False
 
     def create_text_marker(self, text):
         """Create a text marker."""
@@ -193,6 +197,7 @@ class ActionFrankaBridge(Node):
             ee_pose.orientation.y = ee_home_rot.y
             ee_pose.orientation.z = ee_home_rot.z
             ee_pose.orientation.w = ee_home_rot.w
+            self.got_tf = True
             return ee_pose
         except:
             self.get_logger().info('Replacing EE pose with Desired Pose')
@@ -218,7 +223,7 @@ class ActionFrankaBridge(Node):
         pitch_output = self.kp_angle * pitch_error + self.kd_angle * pitch_derivative
         yaw_output = self.kp_angle * yaw_error + self.kd_angle * yaw_derivative
 
-        euler_output = [roll_output, -pitch_output, -yaw_output]
+        euler_output = [roll_output/5.0, -pitch_output/5.0, -yaw_output/5.0]
 
         self.roll_error_prior = roll_error
         self.pitch_error_prior = pitch_error
@@ -256,13 +261,8 @@ class ActionFrankaBridge(Node):
             cols = msg.layout.dim[1].size
 
             self.action_array = np.array(arr).reshape((rows,cols))
-            # with open('./actions_executed.csv', mode='a') as csv_file:
-            #     csv_writer = csv.writer(csv_file)
-            #     csv_writer.writerows(self.action_array)
             self.pending_action = True
 
-            # self.get_logger().info(f'Original Message Arr = {arr}')
-            # self.get_logger().info(f'Number of actions received = {self.action_array.shape[0]}')
             self.get_logger().info(f'Action pairs = {self.action_array}')
 
     def command_mode_callback(self, msg):
@@ -293,10 +293,8 @@ class ActionFrankaBridge(Node):
         self.bounding_box_publisher.publish(self.bounding_box_marker)
 
         if self.move_robot:
-            # self.get_logger().info('Can Move Robot!!!')
                 
             if self.action_array is not None and self.action_counter < self.action_array.shape[0] and self.pending_action:
-                # self.get_logger().info(f'Pulling from action array = {self.action_array}')
 
                 desired_x = float(self.action_array[self.action_counter][0])
                 desired_y = float(self.action_array[self.action_counter][1])
@@ -319,10 +317,18 @@ class ActionFrankaBridge(Node):
                 else:
                     self.desired_ee_pose.position.x = desired_x
                     self.desired_ee_pose.position.y = desired_y
-                
-                self.action_counter +=1
 
                 self.get_logger().info(f'From Action, desired: x={self.desired_ee_pose.position.x}, y={self.desired_ee_pose.position.y}')
+
+                # publish actions and ee pose
+                action_msg = Float32MultiArray()
+                action_msg.data = [desired_x, desired_y]
+                self.current_action_pub.publish(action_msg)
+                ee_msg = Float32MultiArray()
+                ee_msg.data = [current_pos.position.x, current_pos.position.y]
+                self.ee_at_action_pub.publish(ee_msg)
+
+                self.action_counter +=1
 
             else:
                 self.pending_action = False
@@ -335,7 +341,6 @@ class ActionFrankaBridge(Node):
             self.desired_ee_pose = self.get_ee_pose()
             self.get_logger().info('Only using EE for desired (robot move = false)')
 
-
         # Crop to bound area
         self.check_boundaries()
 
@@ -344,28 +349,35 @@ class ActionFrankaBridge(Node):
         except AttributeError as e:
             return
 
-        # Use PID to correct angles
-        current_angles = list(euler_from_quaternion([ee_pose.orientation.x, ee_pose.orientation.y, ee_pose.orientation.z, ee_pose.orientation.w]))
-        desired_angles = list(euler_from_quaternion([1.0, 0.0, 0.0, 0.0]))
-        euler_output = self.angle_correction(current_angles, desired_angles)
+        if self.got_tf:
 
-        self.get_logger().info(f'Desired_pos: x={self.desired_ee_pose.position.x} y={self.desired_ee_pose.position.y} z={0.085}')
-        self.get_logger().info(f'EE_pos:      x={ee_pose.position.x} y={ee_pose.position.y} z={ee_pose.position.z}')
+            # Use PID to correct angles
+            current_angles = list(euler_from_quaternion([ee_pose.orientation.x, ee_pose.orientation.y, ee_pose.orientation.z, ee_pose.orientation.w]))
+            desired_angles = list(euler_from_quaternion([1.0, 0.0, 0.0, 0.0]))
+            euler_output = self.angle_correction(current_angles, desired_angles)
 
-        # Publish Requested Path
-        robot_move = PoseStamped()
-        robot_move.header.frame_id = "panda_link0"
-        robot_move.header.stamp = self.get_clock().now().to_msg()
-        robot_move.pose.position.x = np.round((self.desired_ee_pose.position.x - ee_pose.position.x),4)
-        robot_move.pose.position.y = np.round(-(self.desired_ee_pose.position.y - ee_pose.position.y),4)
-        robot_move.pose.position.z = np.round(-(0.085 - ee_pose.position.z)/2.0,4)
+            self.get_logger().info(f'Desired_pos: x={self.desired_ee_pose.position.x} y={self.desired_ee_pose.position.y} z={0.085}')
+            self.get_logger().info(f'EE_pos:      x={ee_pose.position.x} y={ee_pose.position.y} z={ee_pose.position.z}')
 
-        planpath_request = PlanPath.Request()
-        planpath_request.waypoint = robot_move
-        planpath_request.angles = euler_output
-        future = self.waypoint_client.call_async(planpath_request)
-        self.get_logger().info(f'Executing: x={robot_move.pose.position.x}, y={robot_move.pose.position.y}, z={robot_move.pose.position.z}')
-        self.get_logger().info(f'Executing: roll={euler_output[0]}, pitch={euler_output[1]}, yaw={euler_output[2]}')
+            # Publish Requested Path
+            robot_move = PoseStamped()
+            robot_move.header.frame_id = "panda_link0"
+            robot_move.header.stamp = self.get_clock().now().to_msg()
+            robot_move.pose.position.x = np.round((self.desired_ee_pose.position.x - ee_pose.position.x),4)
+            robot_move.pose.position.y = np.round(-(self.desired_ee_pose.position.y - ee_pose.position.y),4)
+            robot_move.pose.position.z = np.round(-(0.085 - ee_pose.position.z)/2.0,4)
+
+            planpath_request = PlanPath.Request()
+            planpath_request.waypoint = robot_move
+            planpath_request.angles = euler_output
+            future = self.waypoint_client.call_async(planpath_request)
+            self.get_logger().info(f'Executing: x={robot_move.pose.position.x}, y={robot_move.pose.position.y}, z={robot_move.pose.position.z}')
+            self.get_logger().info(f'Executing: roll={euler_output[0]}, pitch={euler_output[1]}, yaw={euler_output[2]}')
+
+            # publish current ee_position
+            current_ee_msg = Float32MultiArray()
+            current_ee_msg.data = [ee_pose.position.x, ee_pose.position.y]
+            self.ee_all_time_pub.publish(current_ee_msg)
 
 def main(args=None):
     rclpy.init(args=args)
