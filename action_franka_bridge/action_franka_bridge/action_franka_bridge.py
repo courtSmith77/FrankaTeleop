@@ -20,19 +20,15 @@ SERVICE CLIENTS:
     motion.
   + /record (Empty) - The service that initiates recording the demonstration data.
 """
-from geometry_msgs.msg import Pose, PoseStamped, Point, Quaternion
-from franka_teleop.srv import PlanPath
+from geometry_msgs.msg import Pose, Point, Quaternion
 
 from visualization_msgs.msg import Marker
 
-from std_srvs.srv import Empty
-from std_msgs.msg import String, Float32MultiArray
+from std_msgs.msg import String, Float32MultiArray, MultiArrayDimension
 
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
-from tf2_geometry_msgs import PoseStamped
 import tf2_ros
-from tf_transformations import quaternion_from_euler, euler_from_quaternion
 
 import rclpy
 from rclpy.node import Node
@@ -40,12 +36,20 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
 
 import numpy as np
-import csv
+
+from action_franka_bridge.moveIt_api import Moveit2Python
 
 class ActionFrankaBridge(Node):
 
     def __init__(self):
         super().__init__('action_franka_bridge')
+
+        # instatiate moveIt wrapper
+        self.api = Moveit2Python(
+            base_frame="panda_link0",
+            ee_frame="panda_hand_tcp",
+            group_name="panda_manipulator"
+            )
 
         # frequency parameter
         self.declare_parameter('frequency', 10.0, ParameterDescriptor(description='Frequency (hz) of the timer callback'))
@@ -66,11 +70,6 @@ class ActionFrankaBridge(Node):
         # publishers for actions
         self.current_action_pub = self.create_publisher(Float32MultiArray, 'current_action', 10)
         self.ee_at_action_pub = self.create_publisher(Float32MultiArray, 'ee_before_action', 10)
-        self.ee_all_time_pub = self.create_publisher(Float32MultiArray, 'ee_all_time', 10)
-
-        # create clients
-        self.waypoint_client = self.create_client(PlanPath, 'robot_waypoints')
-        self.waypoint_client.wait_for_service(timeout_sec=2.0)
 
         # create timer
         self.timer = self.create_timer((1.0/self.timer_freqency), self.timer_callback)
@@ -82,27 +81,13 @@ class ActionFrankaBridge(Node):
         # create class variables
         self.text_marker = self.create_text_marker("Press_'b'_to_begin_inference")
 
-        self.initial_ee_pose = Pose(position=Point(x=0.20, y=0.402, z=0.085),
-                                    orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
-        self.desired_ee_pose = self.initial_ee_pose
         self.move_robot = False
         self.prev_gesture = None
 
         # action variables
         self.pending_action = False
         self.action_array = None
-        self.action_counter = 0
-
-        self.lower_distance_threshold = 0.0
-        self.upper_distance_threshold = 0.05
-
-        # PID parameters
-        self.kp_angle = 1.0
-        self.ki_angle = 0.0
-        self.kd_angle = 0.01
-        self.roll_error_prior = 0
-        self.pitch_error_prior = 0
-        self.yaw_error_prior = 0
+        self.waypoints = None
 
         self.x_limits = [0.15, 1.0]
         self.y_limits = [-0.75, 0.6]
@@ -111,7 +96,6 @@ class ActionFrankaBridge(Node):
         self.bounding_box_marker = self.create_box_marker()
 
         self.count = 0
-        self.got_tf = False
 
     def create_text_marker(self, text):
         """Create a text marker."""
@@ -189,67 +173,36 @@ class ActionFrankaBridge(Node):
 
         try:
             ee_home_pos, ee_home_rot = self.get_transform("panda_link0", "panda_hand_tcp")
-            ee_pose = Pose()
-            ee_pose.position.x = ee_home_pos.x
-            ee_pose.position.y = ee_home_pos.y
-            ee_pose.position.z = ee_home_pos.z
-            ee_pose.orientation.x = ee_home_rot.x
-            ee_pose.orientation.y = ee_home_rot.y
-            ee_pose.orientation.z = ee_home_rot.z
-            ee_pose.orientation.w = ee_home_rot.w
-            self.got_tf = True
-            return ee_pose
+            return [ee_home_pos.x, ee_home_pos.y]
         except:
-            self.get_logger().info('Replacing EE pose with Desired Pose')
-            return self.desired_ee_pose
+            self.get_logger().info('Could not get ee pose transform.')
 
-    def angle_correction(self, current_euler, desired_euler):
-        """Calculate the angle corrections."""
+    def generate_waypoints(self):
+        """Generate waypoints and check for boundary limits."""
 
-        # Orientation PID loops
-        if current_euler[0] < 0:
-            current_euler[0] += 2 * np.pi
-        if desired_euler[0] < 0:
-            desired_euler[0] += 2 * np.pi
-        roll_error = desired_euler[0] - current_euler[0]
-        pitch_error = desired_euler[1] - current_euler[1]
-        yaw_error = desired_euler[2] - current_euler[2]
+        self.waypoints = []
 
-        roll_derivative = (roll_error - self.roll_error_prior)
-        pitch_derivative = (pitch_error - self.pitch_error_prior)
-        yaw_derivative = (yaw_error - self.yaw_error_prior)
+        for i, (x,y) in enumerate(self.action_array):
 
-        roll_output = self.kp_angle * roll_error - self.kd_angle * roll_derivative
-        pitch_output = self.kp_angle * pitch_error + self.kd_angle * pitch_derivative
-        yaw_output = self.kp_angle * yaw_error + self.kd_angle * yaw_derivative
+            if x < self.x_limits[0] or x > self.x_limits[1]:
+                self.action_array[i][0] = self.x_limits[0] if x < self.x_limits[0] else self.x_limits[1]
+                self.get_logger().info('Trying to go to far out of X')
+            
+            if (y < self.y_limits[0] or y > self.y_limits[1]):
+                self.action_array[i][1] = self.y_limits[0] if self.desired_ee_pose.position.y < self.y_limits[0] else self.y_limits[1]
+                self.get_logger().info('Trying to go to far out of Y')
+            
+            if ((y < self.y_inner[1] and y > self.y_inner[0]) and x < self.x_limits[0]):
+                self.get_logger().info('Too close to base!!!!!!!!!!!!!')
+                upper_diff = abs(self.y_inner[1] - y)
+                lower_diff = abs(self.y_inner[0] - y)
+                self.action_array[i][1] = self.y_inner[1] if upper_diff < lower_diff else self.y_inner[0]
 
-        euler_output = [roll_output/5.0, -pitch_output/5.0, -yaw_output/5.0]
-
-        self.roll_error_prior = roll_error
-        self.pitch_error_prior = pitch_error
-        self.yaw_error_prior = yaw_error
-
-        return euler_output
-
-    def check_boundaries(self):
-        """Check for boundary limits."""
-
-        if (self.desired_ee_pose.position.x < self.x_limits[0] or self.desired_ee_pose.position.x > self.x_limits[1]):
-            self.desired_ee_pose.position.x = self.x_limits[0] if self.desired_ee_pose.position.x < self.x_limits[0] else self.x_limits[1]
-            self.get_logger().info('Trying to go to far out of X')
-        if (self.desired_ee_pose.position.y < self.y_limits[0] or self.desired_ee_pose.position.y > self.y_limits[1]):
-            self.desired_ee_pose.position.y = self.y_limits[0] if self.desired_ee_pose.position.y < self.y_limits[0] else self.y_limits[1]
-            self.get_logger().info('Trying to go to far out of Y')
-        if ((self.desired_ee_pose.position.y < self.y_inner[1] and self.desired_ee_pose.position.y > self.y_inner[0]) and self.desired_ee_pose.position.x < self.x_limits[0]):
-            self.get_logger().info('Too close to base!!!!!!!!!!!!!')
-            upper_diff = abs(self.y_inner[1] - self.desired_ee_pose.position.y)
-            lower_diff = abs(self.y_inner[0] - self.desired_ee_pose.position.y)
-            if upper_diff < lower_diff:
-                self.desired_ee_pose.position.y = self.y_inner[1]
-            else:
-                self.desired_ee_pose.position.y = self.y_inner[0]
-        if (self.desired_ee_pose.position.z < self.z_limits[0] or self.desired_ee_pose.position.z > self.z_limits[1]):
-            self.desired_ee_pose.position.z = self.z_limits[0] if self.desired_ee_pose.position.z < self.z_limits[0] else self.z_limits[1]
+            temp_pose = Pose(
+                             position=Point(x=float(self.action_array[i][0]), y=float(self.action_array[i][1]), z=0.085),
+                             orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0),
+                            )
+            self.waypoints.append(temp_pose)
 
     def action_callback(self, msg):
         """Callback for the action subscriber."""
@@ -268,7 +221,6 @@ class ActionFrankaBridge(Node):
     def command_mode_callback(self, msg):
         """Callback for the command mode subscriber."""
         if msg.data == "Begin" or msg.data == "Pause":
-            self.desired_ee_pose = self.get_ee_pose()
             self.text_marker = self.create_text_marker(msg.data)
             self.move_robot = False
 
@@ -280,10 +232,6 @@ class ActionFrankaBridge(Node):
             self.get_logger().info('Allowing robot to move now, if actions are sent')
             self.move_robot = True
 
-            self.desired_ee_pose = self.get_ee_pose()
-            quat = quaternion_from_euler(-np.pi, 0.0, 0.0)
-            self.desired_ee_pose.orientation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
-
         self.prev_gesture = msg.data
 
     async def timer_callback(self):
@@ -294,90 +242,43 @@ class ActionFrankaBridge(Node):
 
         if self.move_robot:
                 
-            if self.action_array is not None and self.action_counter < self.action_array.shape[0] and self.pending_action:
+            if self.action_array is not None and self.pending_action:
 
-                desired_x = float(self.action_array[self.action_counter][0])
-                desired_y = float(self.action_array[self.action_counter][1])
+                # Crop to bound area
+                self.generate_waypoints()
 
-                current_pos = self.get_ee_pose()
-                diff_vector = np.array([desired_x, desired_y]) - np.array([current_pos.position.x, current_pos.position.y])
-                distance = np.linalg.norm(diff_vector)
-                
-                if distance < self.lower_distance_threshold:
-                    self.get_logger().info("Trying to move too close. Staying still.")
-                    self.desired_ee_pose = self.get_ee_pose()
-                elif distance > self.upper_distance_threshold:
-                    self.get_logger().info("Trying to move too far, clipping.")
-
-                    coeff = self.upper_distance_threshold/distance
-                    converted_vector = coeff*diff_vector + np.array([current_pos.position.x, current_pos.position.y])
-                    self.desired_ee_pose.position.x = converted_vector[0]
-                    self.desired_ee_pose.position.y = converted_vector[1]
-                    
-                else:
-                    self.desired_ee_pose.position.x = desired_x
-                    self.desired_ee_pose.position.y = desired_y
-
-                self.get_logger().info(f'From Action, desired: x={self.desired_ee_pose.position.x}, y={self.desired_ee_pose.position.y}')
-
-                # publish actions and ee pose
+                # publish actions
                 action_msg = Float32MultiArray()
-                action_msg.data = [desired_x, desired_y]
+                action_msg.data = self.action_array.flatten().tolist()
+                # add dimensions of flattened array
+                action_msg.layout.dim.append(MultiArrayDimension())
+                action_msg.layout.dim[0].label = "rows"
+                action_msg.layout.dim[0].size = self.action_array.shape[0]
+                action_msg.layout.dim[0].stride = self.action_array.shape[0] * self.action_array.shape[1]
+                action_msg.layout.dim.append(MultiArrayDimension())
+                action_msg.layout.dim[1].label = "columns"
+                action_msg.layout.dim[1].size = self.action_array.shape[1]
+                action_msg.layout.dim[1].stride = self.action_array.shape[1]
                 self.current_action_pub.publish(action_msg)
+                
+                # publish ee position
+                ee_pos = self.get_ee_pose()
                 ee_msg = Float32MultiArray()
-                ee_msg.data = [current_pos.position.x, current_pos.position.y]
+                ee_msg.data = ee_pos
                 self.ee_at_action_pub.publish(ee_msg)
 
-                self.action_counter +=1
+                # perform get cartesian path
+                trajectory = await self.api.get_cartesian_path(self.waypoints)
+
+                # perform execute trajectory
+                result = await self.api.execute_trajectory(trajectory)
+
+                # set pending_action to False
+                self.pending_action = False
 
             else:
                 self.pending_action = False
-                self.action_counter = 0
-                self.desired_ee_pose = self.get_ee_pose()
-                self.get_logger().info('Only using EE for desired (robot move = true)')
 
-        else:
-
-            self.desired_ee_pose = self.get_ee_pose()
-            self.get_logger().info('Only using EE for desired (robot move = false)')
-
-        # Crop to bound area
-        self.check_boundaries()
-
-        try:
-            ee_pose = self.get_ee_pose()
-        except AttributeError as e:
-            return
-
-        if self.got_tf:
-
-            # Use PID to correct angles
-            current_angles = list(euler_from_quaternion([ee_pose.orientation.x, ee_pose.orientation.y, ee_pose.orientation.z, ee_pose.orientation.w]))
-            desired_angles = list(euler_from_quaternion([1.0, 0.0, 0.0, 0.0]))
-            euler_output = self.angle_correction(current_angles, desired_angles)
-
-            self.get_logger().info(f'Desired_pos: x={self.desired_ee_pose.position.x} y={self.desired_ee_pose.position.y} z={0.085}')
-            self.get_logger().info(f'EE_pos:      x={ee_pose.position.x} y={ee_pose.position.y} z={ee_pose.position.z}')
-
-            # Publish Requested Path
-            robot_move = PoseStamped()
-            robot_move.header.frame_id = "panda_link0"
-            robot_move.header.stamp = self.get_clock().now().to_msg()
-            robot_move.pose.position.x = np.round((self.desired_ee_pose.position.x - ee_pose.position.x),4)
-            robot_move.pose.position.y = np.round(-(self.desired_ee_pose.position.y - ee_pose.position.y),4)
-            robot_move.pose.position.z = np.round(-(0.085 - ee_pose.position.z)/2.0,4)
-
-            planpath_request = PlanPath.Request()
-            planpath_request.waypoint = robot_move
-            planpath_request.angles = euler_output
-            future = self.waypoint_client.call_async(planpath_request)
-            self.get_logger().info(f'Executing: x={robot_move.pose.position.x}, y={robot_move.pose.position.y}, z={robot_move.pose.position.z}')
-            self.get_logger().info(f'Executing: roll={euler_output[0]}, pitch={euler_output[1]}, yaw={euler_output[2]}')
-
-            # publish current ee_position
-            current_ee_msg = Float32MultiArray()
-            current_ee_msg.data = [ee_pose.position.x, ee_pose.position.y]
-            self.ee_all_time_pub.publish(current_ee_msg)
 
 def main(args=None):
     rclpy.init(args=args)

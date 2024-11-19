@@ -38,7 +38,7 @@ class DataCollection(Node):
         self.action_horizon_sub = self.create_subscription(Float32MultiArray, 'action_horizon', self.action_horizon_callback, 10)
         self.current_action_sub = self.create_subscription(Float32MultiArray, 'current_action', self.current_action_callback, 10)
         self.ee_at_action_sub = self.create_subscription(Float32MultiArray, 'ee_before_action', self.ee_before_action_callback, 10)
-        self.ee_all_time_sub = self.create_subscription(Float32MultiArray, 'ee_all_time', self.ee_all_time_callback, 10)
+        self.ee_at_all_time_sub = self.create_subscription(Pose, 'desired_ee_pose', self.ee_all_time_callback, 10)
 
         # create service
         self.record_srv = self.create_service(Empty, '/record', self.record_callback)
@@ -87,12 +87,16 @@ class DataCollection(Node):
         """Callback for saving the current action about to be executed."""
         if self.start_recording:
             ca_arr = list(msg.data)
+            rows = msg.layout.dim[0].size
+            cols = msg.layout.dim[1].size
 
             with open('./data/current_action.csv', mode='a') as self.ca_file:
                 self.ca_csv_writer = csv.writer(self.ca_file)
+                ca = np.array(ca_arr).reshape((rows,cols))
                 curr_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-                ca_with_time = [curr_time] + ca_arr
-                self.ca_csv_writer.writerow(ca_with_time)
+                time_column = np.full((ca.shape[0], 1), curr_time)
+                ca_with_time = np.hstack((time_column, ca))
+                self.ca_csv_writer.writerows(ca_with_time)
 
     def ee_before_action_callback(self, msg):
         """Callback for saving the ee pose before executing the current action."""
@@ -108,7 +112,7 @@ class DataCollection(Node):
     def ee_all_time_callback(self, msg):
         """Callback for saving the ee position at all times."""
         if self.start_recording:
-            eat_arr = list(msg.data)
+            eat_arr = [msg.position.x, msg.position.y]
 
             with open('./data/ee_all_time.csv', mode='a') as self.eat_file:
                 self.eat_csv_writer = csv.writer(self.eat_file)
