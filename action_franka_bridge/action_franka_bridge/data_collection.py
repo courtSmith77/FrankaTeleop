@@ -22,31 +22,26 @@ import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rcl_interfaces.msg import ParameterDescriptor
+from std_msgs.msg import Float32MultiArray, MultiArrayDimension
 
 import csv
+import numpy as np
+from datetime import datetime
 
 class DataCollection(Node):
 
     def __init__(self):
         super().__init__('data_collection')
 
-        # frequency parameter
-        self.declare_parameter('frequency', 10.0, ParameterDescriptor(description='Frequency (hz) of the timer callback'))
-        self.timer_freqency = self.get_parameter('frequency').get_parameter_value().double_value
-
-        # create callback groups
-        self.desired_callback_group = MutuallyExclusiveCallbackGroup()
-
-        # create subscribers
-        self.desired_ee_subscriber = self.create_subscription(Pose, '/desired_ee_pose', self.desired_ee_callback, 10, callback_group=self.desired_callback_group)
-        self.end_effector_raw_sub = self.create_subscription(Image, '/d405/color/image_rect_raw', self.end_effector_image_callback, 10)
-        self.scene_image_raw_sub = self.create_subscription(Image, '/d435/color/image_raw', self.scene_image_callback, 10)
+        # subscriptions for actions
+        self.predicted_action_sub = self.create_subscription(Float32MultiArray, '/predicted_action', self.predicted_action_callback, 10)
+        self.action_horizon_sub = self.create_subscription(Float32MultiArray, '/action_horizon', self.action_horizon_callback, 10)
+        self.current_action_sub = self.create_subscription(Float32MultiArray, '/current_action', self.current_action_callback, 10)
+        self.ee_at_action_sub = self.create_subscription(Float32MultiArray, '/ee_before_action', self.ee_before_action_callback, 10)
+        self.ee_at_all_time_sub = self.create_subscription(Pose, '/desired_ee_pose', self.ee_all_time_callback, 10)
 
         # create service
         self.record_srv = self.create_service(Empty, '/record', self.record_callback)
-
-        # create timer
-        self.timer = self.create_timer((1.0/self.timer_freqency), self.timer_callback)
 
         self.bridge = CvBridge()
 
@@ -55,59 +50,85 @@ class DataCollection(Node):
         self.received_scene_image = False
         self.start_recording = False
 
-        self.pos_data = './data/position.csv'
-
         self.count = 0
         self.end = True
 
-    def desired_ee_callback(self, msg):
-        """Callback for the desired ee pose callback"""
-        self.desired_ee = msg
-        self.received_ee_pose = True
+    def predicted_action_callback(self, msg):
+        """Callback for saving the predicted action sequences."""
+        self.get_logger().info('Recieved Predicted Action')
+        if self.start_recording:
+            pa_arr = msg.data
+            rows = msg.layout.dim[0].size
+            cols = msg.layout.dim[1].size
 
-    def end_effector_image_callback(self, msg):
-        """Callback for the end effector image callback"""
-        self.ee_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-        self.received_ee_image = True
+            with open('./data/predicted_action.csv', mode='a') as self.pa_file:
+                self.pa_csv_writer = csv.writer(self.pa_file)
+                pa = np.array(pa_arr).reshape((rows,cols))
+                curr_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                time_column = np.full((pa.shape[0], 1), curr_time)
+                pa_with_time = np.hstack((time_column, pa))
+                self.pa_csv_writer.writerows(pa_with_time)
+            
+            self.get_logger().info('Saved Predicted Action')
 
-    def scene_image_callback(self, msg):
-        """Callback for the scene image callback"""
-        self.scene_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-        self.received_scene_image = True
+    def action_horizon_callback(self, msg):
+        """Callback for saving the entire action horizon sequences."""
+        if self.start_recording:
+            ah_arr = msg.data
+            rows = msg.layout.dim[0].size
+            cols = msg.layout.dim[1].size
+
+            with open('./data/action_horizon.csv', mode='a') as self.ah_file:
+                self.ah_csv_writer = csv.writer(self.ah_file)
+                ah = np.array(ah_arr).reshape((rows,cols))
+                curr_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                time_column = np.full((ah.shape[0], 1), curr_time)
+                ah_with_time = np.hstack((time_column, ah))
+                self.ah_csv_writer.writerows(ah_with_time)
+    
+    def current_action_callback(self, msg):
+        """Callback for saving the current action about to be executed."""
+        if self.start_recording:
+            ca_arr = list(msg.data)
+            rows = msg.layout.dim[0].size
+            cols = msg.layout.dim[1].size
+
+            with open('./data/current_action.csv', mode='a') as self.ca_file:
+                self.ca_csv_writer = csv.writer(self.ca_file)
+                ca = np.array(ca_arr).reshape((rows,cols))
+                curr_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                time_column = np.full((ca.shape[0], 1), curr_time)
+                ca_with_time = np.hstack((time_column, ca))
+                self.ca_csv_writer.writerows(ca_with_time)
+
+    def ee_before_action_callback(self, msg):
+        """Callback for saving the ee pose before executing the current action."""
+        if self.start_recording:
+            eb_arr = list(msg.data)
+
+            with open('./data/ee_before_action.csv', mode='a') as self.eb_file:
+                self.eb_csv_writer = csv.writer(self.eb_file)
+                curr_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                eb_with_time = [curr_time] + eb_arr
+                self.eb_csv_writer.writerow(eb_with_time)
+                self.get_logger().info('Saved to EE before csv')
+
+    def ee_all_time_callback(self, msg):
+        """Callback for saving the ee position at all times."""
+        if self.start_recording:
+            eat_arr = [msg.position.x, msg.position.y]
+
+            with open('./data/ee_all_time.csv', mode='a') as self.eat_file:
+                self.eat_csv_writer = csv.writer(self.eat_file)
+                curr_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                eat_with_time = [curr_time] + eat_arr
+                self.eat_csv_writer.writerow(eat_with_time)
 
     def record_callback(self, request, response):
         """Callback for the start recording callback"""
         self.start_recording = True
         self.get_logger().info('Starting to record...')
         return response
-
-    def timer_callback(self):
-        """Callback for the timer."""
-
-        if self.start_recording:
-
-            if self.received_ee_pose:
-                """Record received pose."""
-                ee_data = [self.desired_ee.position.x, self.desired_ee.position.y, self.desired_ee.position.z]
-                with open(self.pos_data, mode='a') as csv_file:
-                    csv_writer = csv.writer(csv_file)
-                    csv_writer.writerow(ee_data)
-            
-            if self.received_ee_image:
-                """Record received ee image."""
-                ee_img_name = f'./data/ee_img_{self.count}.jpg'
-                cv.imwrite(ee_img_name, self.ee_image)
-
-            if self.received_scene_image:
-                """Record received scene image."""
-                scene_img_name = f'./data/scene_img_{self.count}.jpg'
-                cv.imwrite(scene_img_name, self.scene_image)
-
-            self.count+=1
-
-            if self.count % 50 == 0:
-                self.get_logger().info(f'Received {self.count} messages')
-
 
 def main(args=None):
     rclpy.init(args=args)
@@ -116,12 +137,6 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
 
 
 

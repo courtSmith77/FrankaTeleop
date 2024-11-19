@@ -17,6 +17,9 @@ setup(
         ('share/' + package_name + '/config', ['config/multi_img.rviz']),
     ],
     install_requires=['setuptools'],
+    py_modules=[
+        f"{package_name}.moveIt_api",
+    ],
     zip_safe=True,
     maintainer='Graham Clifford',
     maintainer_email='gclifford@u.northwestern.edu',

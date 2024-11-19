@@ -11,49 +11,33 @@ def generate_launch_description():
         [
             DeclareLaunchArgument(name="use_fake_hardware", default_value="true",
                                   description="whether or not to use fake hardware."),
-            DeclareLaunchArgument(name="use_rviz", default_value="true",
-                                  description="whether or not to use rviz."),
             DeclareLaunchArgument(name="collect_data", default_value="false",
-                                  description="whether or not to use rviz."),
+                                  description="whether or not to collect data during this trial."),
             DeclareLaunchArgument(name="robot_ip", default_value="dont-care",
                                   description="IP address of the robot"),
-            DeclareLaunchArgument(name="use_realsense", default_value="true",
-                                  description="whether or not to use realsense camera."),
-            DeclareLaunchArgument(name="run_franka_teleop", default_value="true",
-                                  description="whether or not to run franka teleop."),
-            DeclareLaunchArgument(name="rviz_file", default_value="integrate_servo.rviz",
-                                  description="rviz file to use."),
             DeclareLaunchArgument(name="frequency", default_value="10.0",
                                   description="the frequency of the nodes (action_franka_bridge and franka_servo)."),
+            DeclareLaunchArgument(name="launch_moveit", default_value="true",
+                                  description="launch the move it node with the current settings"),
+            DeclareLaunchArgument(name="launch_controllers", default_value="true",
+                                  description="launch all controller nodes with the current settings"),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([PathJoinSubstitution(
-                    [FindPackageShare('franka_teleop'), 'launch', 'franka_rviz.launch.py'])]),
-                condition=IfCondition(LaunchConfiguration("use_rviz")),
-                launch_arguments={'robot_ip': LaunchConfiguration("robot_ip"),
-                                  'use_fake_hardware': LaunchConfiguration("use_fake_hardware"),
-                                  'use_rviz': 'true',
-                                  'rviz_file': PathJoinSubstitution([FindPackageShare('action_franka_bridge'),'config',LaunchConfiguration('rviz_file')])}.items(),
-            ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource([PathJoinSubstitution(
-                    [FindPackageShare('franka_teleop'), 'launch', 'franka_servo.launch.py'])]),
-                condition=IfCondition(LaunchConfiguration("run_franka_teleop")),
-                launch_arguments={'robot_ip': LaunchConfiguration("robot_ip"),
-                                  'use_fake_hardware': LaunchConfiguration("use_fake_hardware"),
-                                  'use_rviz': 'false',
-                                  'frequency': LaunchConfiguration("frequency")}.items(),
+                    [FindPackageShare('franka_moveit_config'), 'launch', 'moveit.launch.py'])]),
+                launch_arguments={'use_fake_hardware': LaunchConfiguration("use_fake_hardware"),
+                                  'robot_ip': LaunchConfiguration("robot_ip")}.items(),
+                condition=IfCondition(LaunchConfiguration("launch_moveit"))
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([PathJoinSubstitution(
                     [FindPackageShare('commandmode'), 'launch', 'camera.launch.py'])]),
-                launch_arguments={'use_realsense': LaunchConfiguration("use_realsense")}.items(),
-                condition=IfCondition(LaunchConfiguration("use_realsense"))
+                condition=IfCondition(LaunchConfiguration("launch_controllers"))
             ),
             Node(
                 package="action_franka_bridge",
                 executable="action_franka_bridge",
                 output="screen",
-                condition=IfCondition(LaunchConfiguration("use_realsense")),
+                condition=IfCondition(LaunchConfiguration("launch_controllers")),
                 parameters=[{"frequency": LaunchConfiguration("frequency")}],
             ),
             Node(
@@ -61,13 +45,12 @@ def generate_launch_description():
                 executable="data_collection",
                 output="screen",
                 condition=IfCondition(LaunchConfiguration("collect_data")),
-                parameters=[{"frequency": LaunchConfiguration("frequency")}],
             ),
             Node(
                 package="action_franka_bridge",
                 executable="model_input_publisher",
                 output="screen",
-                condition=IfCondition(LaunchConfiguration("use_realsense")),
+                condition=IfCondition(LaunchConfiguration("launch_controllers")),
             ),
         ]
     )
