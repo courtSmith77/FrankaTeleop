@@ -12,17 +12,16 @@ SERVICES:
   + /record (Empty) - Enables saving the image and scene data
 """
 from geometry_msgs.msg import Pose
-from sensor_msgs.msg import Image
 from std_srvs.srv import Empty
 
-import cv2 as cv
 from cv_bridge import CvBridge
 
 import rclpy
 from rclpy.node import Node
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
-from rcl_interfaces.msg import ParameterDescriptor
-from std_msgs.msg import Float32MultiArray, MultiArrayDimension
+from std_msgs.msg import Float32MultiArray
+
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
 
 import csv
 import numpy as np
@@ -43,7 +42,14 @@ class DataCollection(Node):
         # create service
         self.record_srv = self.create_service(Empty, '/record', self.record_callback)
 
+        # create timer
+        self.timer = self.create_timer(0.01, self.timer_callback)
+
         self.bridge = CvBridge()
+
+        # create tf buffer and listener
+        self.buffer = Buffer()
+        self.listener = TransformListener(self.buffer, self)
 
         self.received_ee_pose = False
         self.received_ee_image = False
@@ -114,17 +120,37 @@ class DataCollection(Node):
         if self.start_recording:
             eat_arr = [msg.position.x, msg.position.y]
 
-            with open('./data/ee_all_time.csv', mode='a') as self.eat_file:
+            with open('./data/ee_all_time_10hz.csv', mode='a') as self.eat_file:
                 self.eat_csv_writer = csv.writer(self.eat_file)
                 curr_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
                 eat_with_time = [curr_time] + eat_arr
                 self.eat_csv_writer.writerow(eat_with_time)
 
     def record_callback(self, request, response):
-        """Callback for the start recording callback"""
+        """Callback for the start recording callback."""
         self.start_recording = True
         self.get_logger().info('Starting to record...')
         return response
+    
+    def timer_callback(self):
+        """Callback for the timer."""
+
+        if self.start_recording:
+
+            try:
+                trans = self.buffer.lookup_transform("panda_link0", "panda_hand_tcp", rclpy.time.Time())
+                translation = trans.transform.translation
+                at_arr = [translation.x, translation.y]
+
+                with open('./data/ee_all_time_100hz.csv', mode='a') as self.at_file:
+                    self.at_csv_writer = csv.writer(self.at_file)
+                    curr_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                    at_with_time = [curr_time] + at_arr
+                    self.at_csv_writer.writerow(at_with_time)
+
+            except:
+                self.get_logger().info('Could not get ee pose transform')
+        
 
 def main(args=None):
     rclpy.init(args=args)

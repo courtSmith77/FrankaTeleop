@@ -94,6 +94,9 @@ class Moveit2Python:
         request.max_cartesian_speed = 0.08
         request.max_velocity_scaling_factor = 0.08
         request.max_acceleration_scaling_factor = 0.03
+        # request.max_cartesian_speed = 0.04
+        # request.max_velocity_scaling_factor = 0.04
+        # request.max_acceleration_scaling_factor = 0.015
         request.cartesian_speed_limited_link = self.ee_frame_id
 
         future = self.cli_get_cartesian_path.call_async(request)
