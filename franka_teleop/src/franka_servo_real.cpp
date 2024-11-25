@@ -17,7 +17,9 @@ using std::placeholders::_1, std::placeholders::_2;
 using namespace moveit_servo;
 
 static Eigen::Vector3d linear_step_size{0.00, 0.00, 0.00};
-static Eigen::AngleAxisd angular_step_size(0.00, Eigen::Vector3d::UnitY());
+static Eigen::AngleAxisd angular_step_size(0.00, Eigen::Vector3d::UnitX());
+static Eigen::AngleAxisd angular_step_size_y(0.00, Eigen::Vector3d::UnitY());
+static Eigen::AngleAxisd angular_step_size_z(0.00, Eigen::Vector3d::UnitZ());
 bool move_robot = false;
 
 void waypoint_callback(const std::shared_ptr<franka_teleop::srv::PlanPath::Request> request,
@@ -30,7 +32,7 @@ void waypoint_callback(const std::shared_ptr<franka_teleop::srv::PlanPath::Reque
     request->waypoint.pose.position.y,
     request->waypoint.pose.position.z};
 
-    angular_step_size = Eigen::AngleAxisd(0.001, Eigen::Vector3d::UnitY());
+    angular_step_size = Eigen::AngleAxisd(0.0, Eigen::Vector3d::UnitX());
 }
 
 int main(int argc, char* argv[])

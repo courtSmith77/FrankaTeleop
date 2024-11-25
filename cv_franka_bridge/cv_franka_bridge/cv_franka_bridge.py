@@ -84,7 +84,9 @@ class CvFrankaBridge(Node):
         self.offset = None
         # self.initial_ee_pose = Pose(position=Point(x=0.30674, y=-0.0014384, z=0.48529),
         #                             orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
-        self.initial_ee_pose = Pose(position=Point(x=0.40, y=0.40, z=0.085),
+        # self.initial_ee_pose = Pose(position=Point(x=0.40, y=0.40, z=0.085),
+        #                             orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
+        self.initial_ee_pose = Pose(position=Point(x=0.40, y=0.10, z=0.085),
                                     orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0))
         self.desired_ee_pose = self.initial_ee_pose
         self.waypoints = []
