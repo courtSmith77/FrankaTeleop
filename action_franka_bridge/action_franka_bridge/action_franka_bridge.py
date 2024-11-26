@@ -22,9 +22,8 @@ SERVICE CLIENTS:
 """
 from geometry_msgs.msg import Pose, Point, Quaternion
 
-from visualization_msgs.msg import Marker
-
 from std_msgs.msg import String, Float32MultiArray, MultiArrayDimension
+from std_srvs.srv import Empty
 
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
@@ -61,15 +60,14 @@ class ActionFrankaBridge(Node):
 
         # create subscribers
         self.action_subscriber = self.create_subscription(Float32MultiArray, 'predicted_action', self.action_callback, 10, callback_group=self.waypoint_callback_group)
-        self.command_mode_subscriber = self.create_subscription(String, 'command_mode', self.command_mode_callback, 10, callback_group=self.command_mode_callback_group)
-
-        # create publishers
-        self.text_marker_publisher = self.create_publisher(Marker, 'text_marker', 10)
-        self.bounding_box_publisher = self.create_publisher(Marker, 'bounding_box', 10)
 
         # publishers for actions
         self.current_action_pub = self.create_publisher(Float32MultiArray, 'current_action', 10)
         self.ee_at_action_pub = self.create_publisher(Float32MultiArray, 'ee_before_action', 10)
+
+        # create client for requesting inference
+        self.diffusion_start_client = self.create_client(Empty, 'start_diffusion')
+        self.diffusion_start_client.wait_for_service(timeout_sec=2.0)
 
         # create timer
         self.timer = self.create_timer((1.0/self.timer_freqency), self.timer_callback)
@@ -77,12 +75,6 @@ class ActionFrankaBridge(Node):
         # create tf buffer and listener
         self.buffer = Buffer()
         self.listener = TransformListener(self.buffer, self)
-
-        # create class variables
-        self.text_marker = self.create_text_marker("Press_'b'_to_begin_inference")
-
-        self.move_robot = False
-        self.prev_gesture = None
 
         # action variables
         self.pending_action = False
@@ -93,59 +85,8 @@ class ActionFrankaBridge(Node):
         self.y_limits = [-0.75, 0.6]
         self.y_inner = [-0.15, 0.15]
         self.z_limits = [0.07, 0.75]
-        self.bounding_box_marker = self.create_box_marker()
 
         self.count = 0
-
-    def create_text_marker(self, text):
-        """Create a text marker."""
-        marker = Marker()
-        marker.header.frame_id = "panda_link0"
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.type = marker.TEXT_VIEW_FACING
-        marker.action = marker.ADD
-        marker.text = text
-        marker.pose.position.x = 0.0
-        marker.pose.position.y = 0.0
-        marker.pose.position.z = 1.0
-        marker.scale.z = 0.1
-        marker.color.a = 1.0
-        marker.color.r = 1.0
-        marker.color.g = 0.0
-        marker.color.b = 1.0
-        return marker
-
-    def create_box_marker(self):
-        """Create a line strip that represents the bounding box."""
-        marker = Marker()
-        marker.header.frame_id = "panda_link0"
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.type = marker.LINE_STRIP
-        marker.action = marker.ADD
-        marker.points = [
-                Point(x=self.x_limits[0], y=self.y_limits[0], z=self.z_limits[0]),
-                Point(x=self.x_limits[1], y=self.y_limits[0], z=self.z_limits[0]),
-                Point(x=self.x_limits[1], y=self.y_limits[1], z=self.z_limits[0]),
-                Point(x=self.x_limits[0], y=self.y_limits[1], z=self.z_limits[0]),
-                Point(x=self.x_limits[0], y=self.y_limits[0], z=self.z_limits[0]),
-                Point(x=self.x_limits[0], y=self.y_limits[0], z=self.z_limits[1]),
-                Point(x=self.x_limits[1], y=self.y_limits[0], z=self.z_limits[1]),
-                Point(x=self.x_limits[1], y=self.y_limits[1], z=self.z_limits[1]),
-                Point(x=self.x_limits[0], y=self.y_limits[1], z=self.z_limits[1]),
-                Point(x=self.x_limits[0], y=self.y_limits[0], z=self.z_limits[1]),
-                Point(x=self.x_limits[1], y=self.y_limits[0], z=self.z_limits[1]),
-                Point(x=self.x_limits[1], y=self.y_limits[0], z=self.z_limits[0]),
-                Point(x=self.x_limits[1], y=self.y_limits[1], z=self.z_limits[0]),
-                Point(x=self.x_limits[1], y=self.y_limits[1], z=self.z_limits[1]),
-                Point(x=self.x_limits[0], y=self.y_limits[1], z=self.z_limits[1]),
-                Point(x=self.x_limits[0], y=self.y_limits[1], z=self.z_limits[0])
-                ]
-        marker.scale.x = 0.01
-        marker.color.a = 1.0
-        marker.color.r = 1.0
-        marker.color.g = 0.0
-        marker.color.b = 1.0
-        return marker
 
     def get_transform(self, target_frame, source_frame):
         """Get the transform between two frames."""
@@ -182,24 +123,50 @@ class ActionFrankaBridge(Node):
 
         self.waypoints = []
 
-        for i, (x,y) in enumerate(self.action_array):
+        total_waypoints = 30
+        interp_points = np.linspace(0,1,total_waypoints)
+        x_interp = np.interp(interp_points, np.linspace(0,1,len(list(self.action_array[:,0]))), self.action_array[:,0])
+        y_interp = np.interp(interp_points, np.linspace(0,1,len(list(self.action_array[:,1]))), self.action_array[:,1])
+        interpolated_points = np.column_stack((x_interp, y_interp))
+
+        # for i, (x,y) in enumerate(self.action_array):
+
+        #     if x < self.x_limits[0] or x > self.x_limits[1]:
+        #         self.action_array[i][0] = self.x_limits[0] if x < self.x_limits[0] else self.x_limits[1]
+        #         self.get_logger().info('Trying to go to far out of X')
+            
+        #     if (y < self.y_limits[0] or y > self.y_limits[1]):
+        #         self.action_array[i][1] = self.y_limits[0] if self.desired_ee_pose.position.y < self.y_limits[0] else self.y_limits[1]
+        #         self.get_logger().info('Trying to go to far out of Y')
+            
+        #     if ((y < self.y_inner[1] and y > self.y_inner[0]) and x < self.x_limits[0]):
+        #         self.get_logger().info('Too close to base!!!!!!!!!!!!!')
+        #         upper_diff = abs(self.y_inner[1] - y)
+        #         lower_diff = abs(self.y_inner[0] - y)
+        #         self.action_array[i][1] = self.y_inner[1] if upper_diff < lower_diff else self.y_inner[0]
+
+        #     temp_pose = Pose(
+        #                      position=Point(x=float(self.action_array[i][0]), y=float(self.action_array[i][1]), z=0.085),
+        #                      orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0),
+        #                     )
+        for i, (x,y) in enumerate(interpolated_points):
 
             if x < self.x_limits[0] or x > self.x_limits[1]:
-                self.action_array[i][0] = self.x_limits[0] if x < self.x_limits[0] else self.x_limits[1]
+                interpolated_points[i][0] = self.x_limits[0] if x < self.x_limits[0] else self.x_limits[1]
                 self.get_logger().info('Trying to go to far out of X')
             
             if (y < self.y_limits[0] or y > self.y_limits[1]):
-                self.action_array[i][1] = self.y_limits[0] if self.desired_ee_pose.position.y < self.y_limits[0] else self.y_limits[1]
+                interpolated_points[i][1] = self.y_limits[0] if self.desired_ee_pose.position.y < self.y_limits[0] else self.y_limits[1]
                 self.get_logger().info('Trying to go to far out of Y')
             
             if ((y < self.y_inner[1] and y > self.y_inner[0]) and x < self.x_limits[0]):
                 self.get_logger().info('Too close to base!!!!!!!!!!!!!')
                 upper_diff = abs(self.y_inner[1] - y)
                 lower_diff = abs(self.y_inner[0] - y)
-                self.action_array[i][1] = self.y_inner[1] if upper_diff < lower_diff else self.y_inner[0]
+                interpolated_points[i][1] = self.y_inner[1] if upper_diff < lower_diff else self.y_inner[0]
 
             temp_pose = Pose(
-                             position=Point(x=float(self.action_array[i][0]), y=float(self.action_array[i][1]), z=0.085),
+                             position=Point(x=float(interpolated_points[i][0]), y=float(interpolated_points[i][1]), z=0.085),
                              orientation=Quaternion(x=1.0, y=0.0, z=0.0, w=0.0),
                             )
             self.waypoints.append(temp_pose)
@@ -218,66 +185,49 @@ class ActionFrankaBridge(Node):
 
             self.get_logger().info(f'Action pairs = {self.action_array}')
 
-    def command_mode_callback(self, msg):
-        """Callback for the command mode subscriber."""
-        if msg.data == "Begin" or msg.data == "Pause":
-            self.text_marker = self.create_text_marker(msg.data)
-            self.move_robot = False
-
-        if msg.data == "Pause":
-            # make sure robot does not move if the command mode is 'Pause'
-            self.move_robot = False
-
-        if self.prev_gesture == "Begin" and msg.data == "Action":
-            self.get_logger().info('Allowing robot to move now, if actions are sent')
-            self.move_robot = True
-
-        self.prev_gesture = msg.data
-
     async def timer_callback(self):
         """Callback for the timer."""
-        # publish a text marker with the current gesture
-        self.text_marker_publisher.publish(self.text_marker)
-        self.bounding_box_publisher.publish(self.bounding_box_marker)
+        
+        if self.action_array is not None and self.pending_action:
 
-        if self.move_robot:
-                
-            if self.action_array is not None and self.pending_action:
+            # Crop to bound area
+            self.generate_waypoints()
 
-                # Crop to bound area
-                self.generate_waypoints()
+            # publish actions
+            action_msg = Float32MultiArray()
+            action_msg.data = self.action_array.flatten().tolist()
+            # add dimensions of flattened array
+            action_msg.layout.dim.append(MultiArrayDimension())
+            action_msg.layout.dim[0].label = "rows"
+            action_msg.layout.dim[0].size = self.action_array.shape[0]
+            action_msg.layout.dim[0].stride = self.action_array.shape[0] * self.action_array.shape[1]
+            action_msg.layout.dim.append(MultiArrayDimension())
+            action_msg.layout.dim[1].label = "columns"
+            action_msg.layout.dim[1].size = self.action_array.shape[1]
+            action_msg.layout.dim[1].stride = self.action_array.shape[1]
+            self.current_action_pub.publish(action_msg)
+            
+            # publish ee position
+            ee_pos = self.get_ee_pose()
+            ee_msg = Float32MultiArray()
+            ee_msg.data = ee_pos
+            self.ee_at_action_pub.publish(ee_msg)
 
-                # publish actions
-                action_msg = Float32MultiArray()
-                action_msg.data = self.action_array.flatten().tolist()
-                # add dimensions of flattened array
-                action_msg.layout.dim.append(MultiArrayDimension())
-                action_msg.layout.dim[0].label = "rows"
-                action_msg.layout.dim[0].size = self.action_array.shape[0]
-                action_msg.layout.dim[0].stride = self.action_array.shape[0] * self.action_array.shape[1]
-                action_msg.layout.dim.append(MultiArrayDimension())
-                action_msg.layout.dim[1].label = "columns"
-                action_msg.layout.dim[1].size = self.action_array.shape[1]
-                action_msg.layout.dim[1].stride = self.action_array.shape[1]
-                self.current_action_pub.publish(action_msg)
-                
-                # publish ee position
-                ee_pos = self.get_ee_pose()
-                ee_msg = Float32MultiArray()
-                ee_msg.data = ee_pos
-                self.ee_at_action_pub.publish(ee_msg)
+            self.get_logger().info('Sending Actions to Move it.')
+            # perform get cartesian path
+            trajectory = await self.api.get_cartesian_path(self.waypoints)
 
-                # perform get cartesian path
-                trajectory = await self.api.get_cartesian_path(self.waypoints)
+            # perform execute trajectory
+            result = await self.api.execute_trajectory(trajectory)
 
-                # perform execute trajectory
-                result = await self.api.execute_trajectory(trajectory)
+            # set pending_action to False
+            self.pending_action = False
 
-                # set pending_action to False
-                self.pending_action = False
+            # call for another inference
+            future = self.diffusion_start_client.call_async(Empty.Request())
 
-            else:
-                self.pending_action = False
+        else:
+            self.pending_action = False
 
 
 def main(args=None):

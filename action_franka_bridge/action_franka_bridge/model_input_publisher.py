@@ -107,8 +107,12 @@ class ModelInputPublisher(Node):
 
         # TODO: make image size not hard coded
         img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-        crop_img = img[150:720, 200:1080]
-        small_img = cv2.resize(crop_img, (110,70))
+        # old cropping
+        # crop_img = img[150:720, 200:1080]
+        # small_img = cv2.resize(crop_img, (110,70))
+        # new cropping
+        crop_img = img[340:710, 300:800]
+        small_img = cv2.resize(crop_img, (165,125))
 
         self.current_scene_img = small_img
         self.scene_flag = True
