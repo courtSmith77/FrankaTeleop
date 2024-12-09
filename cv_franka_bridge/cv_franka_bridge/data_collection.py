@@ -5,6 +5,7 @@ Collect data for training model.
 from geometry_msgs.msg import Pose
 from sensor_msgs.msg import Image
 from std_srvs.srv import Empty
+from std_msgs.msg import Float64MultiArray
 
 import cv2 as cv
 from cv_bridge import CvBridge
@@ -14,6 +15,8 @@ from rclpy.node import Node
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 
 import csv
+import os
+import datetime
 
 class DataCollection(Node):
 
@@ -24,7 +27,9 @@ class DataCollection(Node):
         self.desired_callback_group = MutuallyExclusiveCallbackGroup()
 
         # create subscribers
-        self.desired_ee_subscriber = self.create_subscription(Pose, '/desired_ee_pose', self.desired_ee_callback, 10, callback_group=self.desired_callback_group)
+        # self.desired_ee_subscriber = self.create_subscription(Pose, '/desired_ee_pose', self.desired_ee_callback, 10, callback_group=self.desired_callback_group)
+        self.desired_ee_subscriber = self.create_subscription(Float64MultiArray, '/desired_ee_pose', self.desired_ee_callback, 10, callback_group=self.desired_callback_group)
+
         self.end_effector_raw_sub = self.create_subscription(Image, '/d405/color/image_rect_raw', self.end_effector_image_callback, 10)
         self.scene_image_raw_sub = self.create_subscription(Image, '/d435/color/image_raw', self.scene_image_callback, 10)
 
@@ -41,14 +46,14 @@ class DataCollection(Node):
         self.received_scene_image = False
         self.start_recording = False
 
-        self.pos_data = './data/position.csv'
-
         self.count = 0
-        self.end = True
 
     def desired_ee_callback(self, msg):
         """Callback for the desired ee pose callback"""
-        self.desired_ee = msg
+
+        self.desired_ee_position = [msg.data[0], msg.data[1]]
+
+        # self.desired_ee = msg
         self.received_ee_pose = True
 
     def end_effector_image_callback(self, msg):
@@ -63,8 +68,31 @@ class DataCollection(Node):
 
     def record_callback(self, request, response):
         """Callback for the strat recording callback"""
-        self.start_recording = True
-        self.get_logger().info('Starting to record...')
+
+        if not self.start_recording:
+            self.start_recording = True
+            self.count = 0
+            
+            self.data_dir = datetime.datetime.now().strftime("%H:%M:%S")
+            if not os.path.exists(self.data_dir):
+                os.makedirs(self.data_dir)
+
+            self.ee_img_dir = self.data_dir + '/ee_img/'
+            self.scene_img_dir = self.data_dir + '/scene_img/'
+            if not os.path.exists(self.ee_img_dir):
+                os.makedirs(self.ee_img_dir)
+            if not os.path.exists(self.scene_img_dir):
+                os.makedirs(self.scene_img_dir)
+
+            self.pos_file = self.data_dir + '/position.csv'
+            with open(self.pos_file, mode='w') as csv_file:
+                pass
+
+            self.get_logger().info('Starting record...')
+        else:
+            self.start_recording = False
+            self.get_logger().info('Stopping record...')
+
         return response
 
     def timer_callback(self):
@@ -72,19 +100,20 @@ class DataCollection(Node):
 
         if self.start_recording:
 
-            if self.received_ee_pose and self.received_ee_image and self.received_scene_image and self.end:
+            if self.received_ee_pose and self.received_ee_image and self.received_scene_image:
 
-                ee_data = [self.desired_ee.position.x, self.desired_ee.position.y, self.desired_ee.position.z]
+                # ee_data = [self.desired_ee.position.x, self.desired_ee.position.y, self.desired_ee.position.z]
+                ee_data = self.desired_ee_position
                 self.get_logger().info(f'{ee_data}')
-                with open(self.pos_data, mode='a') as csv_file:
+                with open(self.pos_file, mode='a') as csv_file:
                     csv_writer = csv.writer(csv_file)
                     csv_writer.writerow(ee_data)
 
-                ee_img_name = f'./data/ee_img_{self.count}.jpg'
-                scene_img_name = f'./data/scene_img_{self.count}.jpg'
+                ee_img_name = f'ee_img_{self.count}.jpg'
+                scene_img_name = f'scene_img_{self.count}.jpg'
 
-                cv.imwrite(ee_img_name, self.ee_image)
-                cv.imwrite(scene_img_name, self.scene_image)
+                cv.imwrite(self.ee_img_dir + ee_img_name, self.ee_image)
+                cv.imwrite(self.scene_img_dir + scene_img_name, self.scene_image)
 
                 self.count+=1
                 self.received_ee_pose = False
@@ -93,6 +122,8 @@ class DataCollection(Node):
 
                 if self.count % 10 == 0:
                     self.get_logger().info(f'Received {self.count} messages')
+            else:
+                self.get_logger().info('Did not recieve enough data, not recording!!!!')
 
 def main(args=None):
     rclpy.init(args=args)

@@ -42,6 +42,7 @@ def generate_launch_description():
                 "disparity_filter.enable": "true",
                 "hole_filling_filter.enable": "true",
                 "hdr_merge.enable": "true",
+                "camera_namespace": "",
                 "json_file_path": get_package_share_directory("handcv") + "/config/high_density_preset.json",
             }.items(),
         ),
@@ -73,13 +74,14 @@ def generate_launch_description():
                 "disparity_filter.enable": "true",
                 "hole_filling_filter.enable": "true",
                 "hdr_merge.enable": "true",
+                "camera_namespace": "",
                 "json_file_path": get_package_share_directory("handcv") + "/config/high_density_preset.json",
             }.items(),
         ),
-        Node(
-            package="handcv",
-            executable="handcv",
-            output='screen',
-            prefix="xterm -e",
-        ),
+        # Node(
+        #     package="handcv",
+        #     executable="handcv",
+        #     output='screen',
+        #     prefix="xterm -e",
+        # ),
     ])
