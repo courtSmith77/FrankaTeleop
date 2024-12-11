@@ -84,4 +84,16 @@ def generate_launch_description():
             output='screen',
             prefix="xterm -e",
         ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_d405',
+            arguments=['0','0','0','0','0','0', 'panda_link0', 'd405_link']
+        ),
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_d435',
+            arguments=['0','0','0','0','0','0', 'panda_link0', 'd435_link']
+        ),
     ])
